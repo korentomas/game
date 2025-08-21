@@ -64,7 +64,12 @@ export class MaterialDrop {
   private magnetRange: number = 8; // Range for auto-collection
   private magnetSpeed: number = 15;
   private spawnTime: number = Date.now(); // Track when material spawned
-  private collectDelay: number = 0.5; // Seconds before can be collected
+  private collectDelay: number = 0.5;
+  private isMagnetizing: boolean = false;
+  private magnetTarget: THREE.Vector3 | null = null;
+  private targetPosition: THREE.Vector3 | null = null;
+  private velocity: THREE.Vector3 = new THREE.Vector3();
+  private lastUpdateTime: number = Date.now();
   
   constructor(position: THREE.Vector3, type: MaterialType) {
     this.mesh = new THREE.Group();
@@ -118,14 +123,12 @@ export class MaterialDrop {
     this.floatSpeed = 2 + Math.random();
   }
   
-  update(dt: number, playerPosition?: THREE.Vector3): boolean {
+  update(dt: number, playerPosition?: THREE.Vector3, isLocalPlayer: boolean = false): boolean {
     if (this.collected) return false;
     
-    // Update lifetime
     this.lifetime -= dt;
     if (this.lifetime <= 0) return false;
     
-    // Fade out when about to despawn
     if (this.lifetime < 3) {
       const alpha = this.lifetime / 3;
       this.mesh.children.forEach(child => {
@@ -137,13 +140,11 @@ export class MaterialDrop {
       this.light.intensity = 0.5 * alpha;
     }
     
-    // Check magnet collection (only after spawn delay)
     const timeSinceSpawn = (Date.now() - this.spawnTime) / 1000;
-    if (playerPosition && timeSinceSpawn > this.collectDelay) {
+    if (isLocalPlayer && playerPosition && timeSinceSpawn > this.collectDelay) {
       const distance = this.mesh.position.distanceTo(playerPosition);
       
       if (distance < this.magnetRange) {
-        // Pull towards player
         const direction = new THREE.Vector3()
           .subVectors(playerPosition, this.mesh.position)
           .normalize();
@@ -152,25 +153,26 @@ export class MaterialDrop {
         const speed = this.magnetSpeed * pullStrength * dt;
         
         this.mesh.position.addScaledVector(direction, speed);
+        this.isMagnetizing = true;
+        this.magnetTarget = playerPosition.clone();
         
-        // Collect if very close
         if (distance < 1.5) {
           this.collected = true;
           return false;
         }
+      } else {
+        this.isMagnetizing = false;
+        this.magnetTarget = null;
       }
     }
     
-    // Rotation animation
     this.mesh.rotation.x += this.rotationSpeed.x * dt;
     this.mesh.rotation.y += this.rotationSpeed.y * dt;
     this.mesh.rotation.z += this.rotationSpeed.z * dt;
     
-    // Floating animation
     const floatHeight = Math.sin(Date.now() * 0.001 * this.floatSpeed + this.floatOffset) * 0.2;
     this.mesh.children[0].position.y = floatHeight;
     
-    // Pulse light
     this.light.intensity = 0.5 + Math.sin(Date.now() * 0.003) * 0.2;
     
     return true;
@@ -178,6 +180,53 @@ export class MaterialDrop {
   
   isCollected(): boolean {
     return this.collected;
+  }
+  
+  isMagnetizingTo(): boolean {
+    return this.isMagnetizing;
+  }
+  
+  getMagnetTarget(): THREE.Vector3 | null {
+    return this.magnetTarget;
+  }
+  
+  getVelocity(): THREE.Vector3 {
+    return this.velocity.clone();
+  }
+  
+  setTargetPosition(position: THREE.Vector3) {
+    if (!this.targetPosition) {
+      this.targetPosition = position.clone();
+      if (this.mesh.position.distanceTo(position) > 10) {
+        this.mesh.position.copy(position);
+      }
+    } else {
+      const now = Date.now();
+      const dt = (now - this.lastUpdateTime) / 1000;
+      if (dt > 0 && dt < 1) {
+        this.velocity.subVectors(position, this.targetPosition).divideScalar(dt);
+      }
+      this.targetPosition.copy(position);
+    }
+    this.lastUpdateTime = Date.now();
+  }
+  
+  updateRemote(dt: number) {
+    if (this.targetPosition) {
+      const predictedPos = this.targetPosition.clone().addScaledVector(this.velocity, dt * 0.5);
+      
+      const distance = this.mesh.position.distanceTo(predictedPos);
+      let lerpFactor = 0.15;
+      
+      if (distance > 5) {
+        lerpFactor = 0.3;
+      } else if (distance < 0.5) {
+        lerpFactor = 0.1;
+      }
+      
+      this.mesh.position.lerp(predictedPos, lerpFactor);
+      this.velocity.multiplyScalar(0.95);
+    }
   }
   
   dispose() {

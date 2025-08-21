@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { SimpleNameTag } from '../ui/SimpleNameTag';
 import { RemoteShip } from '../entities/RemoteShip';
+import { SnapshotBuffer } from './SnapshotBuffer';
 
 export interface NetworkPlayer {
   id: string;
@@ -62,18 +63,32 @@ export class NetworkManager {
   private onChatMessage?: (playerId: string, playerName: string, text: string) => void;
   private onPlayerShoot?: (playerId: string, position: THREE.Vector3, direction: THREE.Vector3) => void;
   private onMaterialSpawn?: (id: string, position: THREE.Vector3, type: string) => void;
-  private onMaterialCollect?: (id: string, collectorId: string) => void;
+  private onMaterialCollect?: (id: string, collectorId: string, collectorPosition?: THREE.Vector3) => void;
   private onMaterialUpdate?: (materialId: string, position: THREE.Vector3) => void;
   // Junk spawn callback removed - deterministic generation
   private onJunkDestroy?: (junkId: string, destroyerId: string) => void;
   private onJunkHit?: (junkId: string, damage: number, hitterId: string) => void;
   private onCustomizationLoaded?: (customization: any) => void;
+  private onMagnetizeStarted?: (playerId: string, junkIds: string[]) => void;
+  private onMagnetizeStopped?: (playerId: string, junkIds: string[]) => void;
+  private onMagnetizePhysicsUpdate?: (updates: any[]) => void;
+  private onJunkCollect?: (junkId: string, collectorId: string) => void;
   
   constructor() {}
   
   
-  async connect(url: string = 'ws://localhost:3001') {
+  async connect(url?: string) {
+    // Determine WebSocket URL based on current page
+    if (!url) {
+      const currentPort = window.location.port;
+      // If running on port 5175 (Docker web), use port 3002 (Docker WS)
+      // If running on port 5173 (dev), use port 3001 (dev WS)
+      const wsPort = currentPort === '5175' ? '3002' : '3001';
+      url = `ws://localhost:${wsPort}`;
+    }
+    
     return new Promise<void>((resolve, reject) => {
+      console.log('Connecting to WebSocket:', url);
       this.ws = new WebSocket(url);
       
       this.ws.onopen = () => {
@@ -216,14 +231,26 @@ export class NetworkManager {
         // Handle material spawn from other players
         if (this.onMaterialSpawn && message.id) {
           const position = new THREE.Vector3(message.position.x, message.position.y, message.position.z);
-          this.onMaterialSpawn(message.id, position, message.type);
+          this.onMaterialSpawn(message.id, position, message.materialType);
         }
         break;
         
       case 'material-collect':
         // Handle material collection by other players
         if (this.onMaterialCollect && message.id) {
-          this.onMaterialCollect(message.id, message.collectorId);
+          let collectorPos;
+          if (message.collectorPosition) {
+            collectorPos = new THREE.Vector3(
+              message.collectorPosition.x,
+              message.collectorPosition.y,
+              message.collectorPosition.z
+            );
+          }
+          if (collectorPos) {
+            this.onMaterialCollect(message.id, message.collectorId, collectorPos);
+          } else {
+            this.onMaterialCollect(message.id, message.collectorId);
+          }
         }
         break;
         
@@ -252,6 +279,34 @@ export class NetworkManager {
         }
         break;
         
+      case 'magnetize-started':
+        // Handle magnetization start notification
+        if (this.onMagnetizeStarted && message.playerId && message.junkIds) {
+          this.onMagnetizeStarted(message.playerId, message.junkIds);
+        }
+        break;
+        
+      case 'magnetize-stopped':
+        // Handle magnetization stop notification
+        if (this.onMagnetizeStopped && message.playerId && message.junkIds) {
+          this.onMagnetizeStopped(message.playerId, message.junkIds);
+        }
+        break;
+        
+      case 'magnetize-physics-update':
+        // Handle server-authoritative physics updates for magnetized junk
+        if (this.onMagnetizePhysicsUpdate && message.updates) {
+          this.onMagnetizePhysicsUpdate(message.updates);
+        }
+        break;
+        
+      case 'junk-collect':
+        // Handle junk collection from magnetization
+        if (this.onJunkCollect && message.junkId) {
+          this.onJunkCollect(message.junkId, message.collectorId);
+        }
+        break;
+        
       case 'customization-update':
         // Handle customization update from other players
         if (message.playerId && message.customization) {
@@ -270,7 +325,9 @@ export class NetworkManager {
     
     const peer = new RTCPeerConnection({
       iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' }
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' }
       ]
     });
     
@@ -314,7 +371,9 @@ export class NetworkManager {
     
     const peer = new RTCPeerConnection({
       iceServers: [
-        { urls: 'stun:stun.l.google.com:19302' }
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' }
       ]
     });
     
@@ -370,18 +429,34 @@ export class NetworkManager {
     if (!dataChannel) return;
     
     dataChannel.onopen = () => {
-      console.log('DataChannel opened with', playerId);
+      console.log('✅ DataChannel opened with', playerId);
+      console.log('DataChannel state:', dataChannel.readyState);
+      
+      // Send a test ping to verify connection
+      if (dataChannel.readyState === 'open') {
+        dataChannel.send(JSON.stringify({
+          type: 'ping',
+          from: this.localPlayerId,
+          timestamp: Date.now()
+        }));
+      }
     };
     
     dataChannel.onclose = () => {
-      console.log('DataChannel closed with', playerId);
+      console.log('❌ DataChannel closed with', playerId);
       this.dataChannels.delete(playerId);
+    };
+    
+    dataChannel.onerror = (error) => {
+      console.error('⚠️ DataChannel error with', playerId, ':', error);
     };
     
     dataChannel.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
-        if (data.type === 'position') {
+        if (data.type === 'ping') {
+          console.log(`🏓 Received ping from ${data.from}, RTT: ${Date.now() - (data.timestamp || 0)}ms`);
+        } else if (data.type === 'position') {
           this.updateRemotePlayer(data.playerId, data.position, data.rotation, data.velocity, data.isThrusting);
         } else if (data.type === 'delta') {
           // Apply delta updates
@@ -421,7 +496,15 @@ export class NetworkManager {
         } else if (data.type === 'material-collect') {
           // Handle material collection via DataChannel
           if (this.onMaterialCollect && data.id) {
-            this.onMaterialCollect(data.id, data.collectorId);
+            let collectorPos: THREE.Vector3 | undefined;
+            if (data.collectorPosition) {
+              collectorPos = new THREE.Vector3(
+                data.collectorPosition.x,
+                data.collectorPosition.y,
+                data.collectorPosition.z
+              );
+            }
+            this.onMaterialCollect(data.id, data.collectorId, collectorPos);
           }
         } else if (data.type === 'material-update') {
           // Handle material position update (magnetization sync)
@@ -790,12 +873,20 @@ export class NetworkManager {
     }
   }
   
-  sendMaterialCollect(id: string) {
-    const data = {
+  sendMaterialCollect(id: string, collectorPosition?: THREE.Vector3) {
+    const data: any = {
       type: 'material-collect',
       id: id,
       collectorId: this.localPlayerId
     };
+    
+    if (collectorPosition) {
+      data.collectorPosition = { 
+        x: collectorPosition.x, 
+        y: collectorPosition.y, 
+        z: collectorPosition.z 
+      };
+    }
     
     // Send to all open data channels
     this.dataChannels.forEach((dataChannel) => {
@@ -850,6 +941,29 @@ export class NetworkManager {
     }
   }
   
+  sendMagnetizeStart(junkIds: string[]) {
+    const data = {
+      type: 'magnetize-start',
+      junkIds: junkIds
+    };
+    
+    // Send via WebSocket (server-authoritative physics)
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(data));
+    }
+  }
+  
+  sendMagnetizeStop() {
+    const data = {
+      type: 'magnetize-stop'
+    };
+    
+    // Send via WebSocket (server-authoritative physics)
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(data));
+    }
+  }
+  
   sendJunkHit(junkId: string, damage: number) {
     const data = {
       type: 'junk-hit',
@@ -878,12 +992,16 @@ export class NetworkManager {
     onChatMessage?: (playerId: string, playerName: string, text: string) => void;
     onPlayerShoot?: (playerId: string, position: THREE.Vector3, direction: THREE.Vector3) => void;
     onMaterialSpawn?: (id: string, position: THREE.Vector3, type: string) => void;
-    onMaterialCollect?: (id: string, collectorId: string) => void;
+    onMaterialCollect?: (id: string, collectorId: string, collectorPosition?: THREE.Vector3) => void;
     onMaterialUpdate?: (materialId: string, position: THREE.Vector3) => void;
     // onJunkSpawn removed - deterministic generation
     onJunkDestroy?: (junkId: string, destroyerId: string) => void;
     onJunkHit?: (junkId: string, damage: number, hitterId: string) => void;
     onCustomizationLoaded?: (customization: any) => void;
+    onMagnetizeStarted?: (playerId: string, junkIds: string[]) => void;
+    onMagnetizeStopped?: (playerId: string, junkIds: string[]) => void;
+    onMagnetizePhysicsUpdate?: (updates: any[]) => void;
+    onJunkCollect?: (junkId: string, collectorId: string) => void;
   }) {
     this.onPlayerJoined = callbacks.onPlayerJoined;
     this.onPlayerLeft = callbacks.onPlayerLeft;
@@ -897,6 +1015,10 @@ export class NetworkManager {
     this.onJunkDestroy = callbacks.onJunkDestroy;
     this.onJunkHit = callbacks.onJunkHit;
     this.onCustomizationLoaded = callbacks.onCustomizationLoaded;
+    this.onMagnetizeStarted = callbacks.onMagnetizeStarted;
+    this.onMagnetizeStopped = callbacks.onMagnetizeStopped;
+    this.onMagnetizePhysicsUpdate = callbacks.onMagnetizePhysicsUpdate;
+    this.onJunkCollect = callbacks.onJunkCollect;
   }
   
   disconnect() {

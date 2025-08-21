@@ -58,12 +58,28 @@ export class AuthManager {
     return this.currentSession !== null;
   }
   
+  private getWebSocketUrl(): string {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    
+    if (window.location.hostname === 'localhost') {
+      // Determine WebSocket port based on current page port
+      const currentPort = window.location.port;
+      // If running on port 5175 (Docker web), use port 3002 (Docker WS)
+      // If running on port 5173 (dev), use port 3001 (dev WS)
+      const wsPort = currentPort === '5175' ? '3002' : '3001';
+      const url = `${protocol}//localhost:${wsPort}`;
+      console.log(`AuthManager: Current port: ${currentPort}, WebSocket URL: ${url}`);
+      return url;
+    } else {
+      // Production uses same host
+      return `${protocol}//${window.location.host}`;
+    }
+  }
+  
   public async login(username: string): Promise<UserSession> {
     return new Promise((resolve, reject) => {
       // Connect to auth server (same as game server for now)
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = window.location.hostname === 'localhost' ? 'localhost:3001' : window.location.host;
-      this.ws = new WebSocket(`${protocol}//${host}`);
+      this.ws = new WebSocket(this.getWebSocketUrl());
       
       this.ws.onopen = () => {
         // Send login request
@@ -127,9 +143,7 @@ export class AuthManager {
     if (!this.currentSession) return false;
     
     return new Promise((resolve) => {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const host = window.location.hostname === 'localhost' ? 'localhost:3001' : window.location.host;
-      const ws = new WebSocket(`${protocol}//${host}`);
+      const ws = new WebSocket(this.getWebSocketUrl());
       
       ws.onopen = () => {
         ws.send(JSON.stringify({

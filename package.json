@@ -12,7 +12,14 @@
     "test:coverage": "jest --coverage",
     "test:ci": "jest --ci --coverage --maxWorkers=2"
   },
-  "keywords": ["game", "multiplayer", "space", "voxel", "webgl", "threejs"],
+  "keywords": [
+    "game",
+    "multiplayer",
+    "space",
+    "voxel",
+    "webgl",
+    "threejs"
+  ],
   "author": "",
   "license": "MIT",
   "description": "A retro-style multiplayer space exploration game with voxel terrain",
@@ -30,6 +37,7 @@
   "dependencies": {
     "cors": "^2.8.5",
     "express": "^5.1.0",
+    "redis": "^5.8.2",
     "simplex-noise": "^4.0.3",
     "three": "^0.179.1",
     "three-stdlib": "^2.36.0",

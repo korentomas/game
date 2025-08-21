@@ -24,6 +24,7 @@ import { CustomizationMenu } from '../ui/CustomizationMenu';
 import { LoginScreen } from '../ui/LoginScreen';
 import { AuthManager } from '../auth/AuthManager';
 import { SyncOverlay } from '../ui/SyncOverlay';
+import { MagnetizationClient } from '../client/MagnetizationClient';
 
 export async function bootstrap() {
   const appEl = document.getElementById('app')!;
@@ -170,8 +171,23 @@ export async function bootstrap() {
   // Initialize networking
   const networkManager = new NetworkManager();
   
+  // Initialize magnetization client (will update player ID later)
+  const magnetizationClient = new MagnetizationClient('offline');
+  
   // Set up network callbacks
   networkManager.setCallbacks({
+    onMagnetizeStarted: (playerId, junkIds) => {
+      magnetizationClient.handleMagnetizeStarted(playerId, junkIds);
+    },
+    onMagnetizeStopped: (playerId, junkIds) => {
+      magnetizationClient.handleMagnetizeStopped(playerId, junkIds);
+    },
+    onMagnetizePhysicsUpdate: (updates) => {
+      magnetizationClient.handlePhysicsUpdate(updates);
+    },
+    onJunkCollect: (junkId, collectorId) => {
+      magnetizationClient.handleCollection(junkId, collectorId);
+    },
     onCustomizationLoaded: (customization) => {
       // Server sent us our saved customization
       console.log('Applying saved customization from server');
@@ -198,43 +214,43 @@ export async function bootstrap() {
           // Remove from scene
           scene.remove(player.group);
         
-        // Remove particle system from scene
-        if (player.ship && player.ship.thrusterSystem) {
-          scene.remove(player.ship.thrusterSystem.points);
-          // Dispose of thruster Points object's geometry and material
-          if (player.ship.thrusterSystem.points.geometry) {
-            player.ship.thrusterSystem.points.geometry.dispose();
-          }
-          if (player.ship.thrusterSystem.points.material) {
-            const material = player.ship.thrusterSystem.points.material;
-            if (Array.isArray(material)) {
-              material.forEach(mat => mat.dispose());
-            } else {
-              material.dispose();
+          // Remove particle system from scene
+          if (player.ship && player.ship.thrusterSystem) {
+            scene.remove(player.ship.thrusterSystem.points);
+            // Dispose of thruster Points object's geometry and material
+            if (player.ship.thrusterSystem.points.geometry) {
+              player.ship.thrusterSystem.points.geometry.dispose();
             }
-          }
-        }
-        
-        // Remove name tag from scene
-        if (player.nameTagGroup) {
-          scene.remove(player.nameTagGroup);
-        }
-        
-        // Dispose of ship geometries and materials
-        player.group.traverse((child) => {
-          if (child instanceof THREE.Mesh) {
-            if (child.geometry) child.geometry.dispose();
-            if (child.material) {
-              if (Array.isArray(child.material)) {
-                child.material.forEach(mat => mat.dispose());
+            if (player.ship.thrusterSystem.points.material) {
+              const material = player.ship.thrusterSystem.points.material;
+              if (Array.isArray(material)) {
+                material.forEach(mat => mat.dispose());
               } else {
-                child.material.dispose();
+                material.dispose();
               }
             }
           }
-        });
         
-        console.log('Cleaned up disconnected player:', playerId);
+          // Remove name tag from scene
+          if (player.nameTagGroup) {
+            scene.remove(player.nameTagGroup);
+          }
+        
+          // Dispose of ship geometries and materials
+          player.group.traverse((child) => {
+            if (child instanceof THREE.Mesh) {
+              if (child.geometry) child.geometry.dispose();
+              if (child.material) {
+                if (Array.isArray(child.material)) {
+                  child.material.forEach(mat => mat.dispose());
+                } else {
+                  child.material.dispose();
+                }
+              }
+            }
+          });
+        
+          console.log('Cleaned up disconnected player:', playerId);
         } catch (error) {
           console.error('Error during player cleanup:', error);
         }
@@ -272,13 +288,24 @@ export async function bootstrap() {
     },
     onMaterialSpawn: (id, position, type) => {
       // Spawn material from remote player
-      console.log('Remote material spawn:', id, type, 'at', position);
+      console.log('Remote material spawn - Full ID:', id, 'Type:', type, 'at', position);
       materialManager.spawnRemote(id, position, type as MaterialType);
     },
-    onMaterialCollect: (id, collectorId) => {
+    onMaterialCollect: (id, collectorId, collectorPosition) => {
       // Remove material that was collected by another player
-      console.log('Remote material collect:', id, 'by', collectorId);
-      materialManager.collectRemote(id);
+      console.log('Remote material collect:', id, 'by', collectorId, 'at', collectorPosition);
+      let targetPos = collectorPosition;
+      if (!targetPos) {
+        if (collectorId === networkManager.localPlayerId) {
+          targetPos = ship.position.clone();
+        } else {
+          const player = networkManager.remotePlayers.get(collectorId);
+          if (player) {
+            targetPos = player.group.position.clone();
+          }
+        }
+      }
+      materialManager.collectRemote(id, collectorId, targetPos);
       
       // Show message if material was stolen from us
       const player = networkManager.remotePlayers.get(collectorId);
@@ -287,7 +314,7 @@ export async function bootstrap() {
       }
     },
     onMaterialUpdate: (materialId, position) => {
-      // Update remote material position during magnetization
+      // Update remote material position
       materialManager.updateRemotePosition(materialId, position);
     },
     // Junk spawn no longer needs network sync - each player generates deterministically
@@ -442,23 +469,47 @@ export async function bootstrap() {
   const materialManager = new MaterialManager((type, value, materialId) => {
     inventory[type] += value;
     console.log(`Collected ${value} ${type}! Total: ${inventory[type]}`);
-    // Send collection to network
-    networkManager.sendMaterialCollect(materialId);
+    // Send collection to network with ship position
+    networkManager.sendMaterialCollect(materialId, ship.position);
   });
   scene.add(materialManager.group);
   
-  // Set up magnetization callback (throttled to reduce network traffic)
-  let lastMagnetUpdate = 0;
+  // Set up material position sync callback (throttled to reduce network traffic)
+  const materialUpdateThrottle: Map<string, number> = new Map();
+  
   materialManager.setOnMagnetizing((materialId, position) => {
     const now = Date.now();
-    if (now - lastMagnetUpdate > 50) { // Only send updates every 50ms
+    const lastUpdate = materialUpdateThrottle.get(materialId) || 0;
+    
+    // Send updates every 50ms for each material (20 updates/sec)
+    if (now - lastUpdate > 50) {
       networkManager.sendMaterialUpdate(materialId, position);
-      lastMagnetUpdate = now;
+      materialUpdateThrottle.set(materialId, now);
     }
   });
   
   const junk = new JunkManager(seed, entityManager, fadeManager, effectsManager);
   scene.add(junk.group);
+  
+  // Set up magnetization callbacks
+  magnetizationClient.setCallbacks({
+    onJunkMagnetized: (junkId, playerId) => {
+      // Mark junk as being magnetized (disable local physics)
+      junk.setMagnetized(junkId, true);
+    },
+    onJunkReleased: (junkId) => {
+      // Re-enable local physics for this junk
+      junk.setMagnetized(junkId, false);
+    },
+    onJunkPositionUpdate: (junkId, position, velocity) => {
+      // Update junk position from server (interpolated)
+      junk.updateRemotePosition(junkId, position, velocity);
+    },
+    onJunkCollected: (junkId, collectorId) => {
+      // Handle collection
+      junk.collectJunk(junkId, collectorId === networkManager.localPlayerId);
+    }
+  });
   
   // Set up junk network callbacks (only destruction needs syncing)
   junk.setNetworkCallbacks({
@@ -517,6 +568,7 @@ export async function bootstrap() {
   let last = performance.now();
   let lastNetworkUpdate = 0;
   const networkUpdateRate = 50; // 20Hz
+  let isMagnetizing = false;
 
   function onResize() {
     const w = Math.floor(window.innerWidth / pixelScale);
@@ -562,6 +614,26 @@ export async function bootstrap() {
         networkManager.sendShoot(muzzle, ship.heading);
       }
     }
+    
+    // Handle magnetization (key 'f')
+    if (!isSyncing && input.isDown('f')) {
+      if (!isMagnetizing) {
+        isMagnetizing = true;
+        // Find nearby junk to magnetize
+        const nearbyJunk = junk.getNearbyJunkIds(ship.position, 15); // 15 unit radius
+        if (nearbyJunk.length > 0) {
+          console.log(`Starting magnetization of ${nearbyJunk.length} junk objects`);
+          networkManager.sendMagnetizeStart(nearbyJunk);
+        }
+      }
+    } else if (isMagnetizing) {
+      isMagnetizing = false;
+      console.log('Stopping magnetization');
+      networkManager.sendMagnetizeStop();
+    }
+    
+    // Update magnetization client
+    magnetizationClient.update(dt);
     
     // Update projectiles
     projectileManager.update(dt);
@@ -767,7 +839,12 @@ export async function bootstrap() {
     effectsManager.update(dt);
     
     // Update material drops
-    const collectedMaterials = materialManager.update(dt, ship.position);
+    // Build map of all known player positions for nearest-collector logic
+    const allPlayerPositions = new Map<string, THREE.Vector3>();
+    networkManager.remotePlayers.forEach((player, id) => {
+      allPlayerPositions.set(id, player.group.position.clone());
+    });
+    const collectedMaterials = materialManager.update(dt, ship.position, allPlayerPositions);
     // Collected materials are already sent to network in the MaterialManager constructor callback
 
     // Update HUD (throttled)

@@ -1,17 +1,43 @@
 const WebSocket = require('ws');
 const http = require('http');
 const crypto = require('crypto');
+const RedisStore = require('./redis-store');
+const MagnetizationManager = require('./src/server/MagnetizationManager');
 
-const server = http.createServer();
+const server = http.createServer((req, res) => {
+  // Health check endpoint
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('OK');
+  } else {
+    res.writeHead(404);
+    res.end();
+  }
+});
 const wss = new WebSocket.Server({ server });
 
-// Store connected players
+// Initialize Redis store
+const store = new RedisStore();
+let redisAvailable = false;
+
+// Connect to Redis
+store.connect().then(connected => {
+  redisAvailable = connected;
+  if (redisAvailable) {
+    console.log('Server: Using Redis for data persistence');
+  } else {
+    console.log('Server: Redis not available, falling back to in-memory storage');
+  }
+});
+
+// Store connected players (always in-memory for real-time state)
 const rooms = new Map(); // roomId -> Set of player connections
 const playerRooms = new Map(); // ws -> roomId
+const roomMagnetizers = new Map(); // roomId -> MagnetizationManager instance
 
-// Simple in-memory user storage (replace with Redis later)
-const users = new Map(); // username -> user data
-const sessions = new Map(); // token -> session data
+// Fallback in-memory storage if Redis is not available
+const memoryUsers = new Map(); // username -> user data
+const memorySessions = new Map(); // token -> session data
 
 class Player {
   constructor(ws, id, username = null) {
@@ -30,7 +56,7 @@ wss.on('connection', (ws) => {
   ws.playerId = playerId; // Store on ws object so it persists
   console.log(`Connection ${playerId} established`);
 
-  ws.on('message', (message) => {
+  ws.on('message', async (message) => {
     try {
       const data = JSON.parse(message);
       
@@ -51,7 +77,24 @@ wss.on('connection', (ws) => {
           
           // If a token is provided, validate it and get the username and saved customization
           if (data.token) {
-            const session = sessions.get(data.token);
+            let session = null;
+            
+            if (redisAvailable) {
+              session = await store.getSession(data.token);
+            } else {
+              // Fallback to memory storage
+              session = memorySessions.get(data.token);
+              if (session) {
+                // Check if session is still valid (24 hours)
+                const age = Date.now() - session.createdAt;
+                if (age >= 24 * 60 * 60 * 1000) {
+                  // Session expired
+                  memorySessions.delete(data.token);
+                  session = null;
+                }
+              }
+            }
+            
             if (session) {
               // Valid session - use userId as playerId for consistency
               ws.username = session.username;
@@ -60,7 +103,12 @@ wss.on('connection', (ws) => {
               playerId = session.userId; // Update local variable too
               
               // Load user's saved customization
-              const user = users.get(session.userId);
+              let user;
+              if (redisAvailable) {
+                user = await store.getUserById(session.userId);
+              } else {
+                user = memoryUsers.get(session.userId);
+              }
               if (user && user.customization) {
                 customization = user.customization;
                 console.log(`Loaded saved customization for ${ws.username}`);
@@ -207,7 +255,29 @@ wss.on('connection', (ws) => {
                   other.ws.send(JSON.stringify({
                     type: 'material-collect',
                     id: data.id,
-                    collectorId: data.collectorId || ws.playerId
+                    collectorId: data.collectorId || ws.playerId,
+                    collectorPosition: data.collectorPosition || undefined
+                  }));
+                }
+              });
+            }
+          }
+          break;
+        }
+        
+        case 'material-update': {
+          // Broadcast material position updates (for magnetization)
+          const roomId = playerRooms.get(ws);
+          if (roomId) {
+            const room = rooms.get(roomId);
+            if (room) {
+              room.forEach(other => {
+                if (other.ws !== ws && other.ws.readyState === WebSocket.OPEN) {
+                  other.ws.send(JSON.stringify({
+                    type: 'material-update',
+                    materialId: data.materialId,
+                    position: data.position,
+                    magnetizerId: ws.playerId
                   }));
                 }
               });
@@ -237,6 +307,67 @@ wss.on('connection', (ws) => {
           break;
         }
         
+        case 'magnetize-start': {
+          // Player starts magnetizing junk/materials
+          const roomId = playerRooms.get(ws);
+          if (roomId) {
+            let magnetizer = roomMagnetizers.get(roomId);
+            if (!magnetizer) {
+              magnetizer = new MagnetizationManager();
+              roomMagnetizers.set(roomId, magnetizer);
+            }
+            
+            // Get player position
+            const room = rooms.get(roomId);
+            const player = Array.from(room).find(p => p.ws === ws);
+            if (player) {
+              const magnetizedIds = magnetizer.startMagnetization(
+                ws.playerId,
+                data.junkIds || [],
+                player.position
+              );
+              
+              // Notify all players which objects are being magnetized
+              room.forEach(other => {
+                if (other.ws.readyState === WebSocket.OPEN) {
+                  other.ws.send(JSON.stringify({
+                    type: 'magnetize-started',
+                    playerId: ws.playerId,
+                    junkIds: magnetizedIds
+                  }));
+                }
+              });
+            }
+          }
+          break;
+        }
+        
+        case 'magnetize-stop': {
+          // Player stops magnetizing
+          const roomId = playerRooms.get(ws);
+          if (roomId) {
+            const magnetizer = roomMagnetizers.get(roomId);
+            if (magnetizer) {
+              const stoppedIds = magnetizer.stopMagnetization(ws.playerId);
+              
+              // Notify all players
+              const room = rooms.get(roomId);
+              if (room) {
+                room.forEach(other => {
+                  if (other.ws.readyState === WebSocket.OPEN) {
+                    other.ws.send(JSON.stringify({
+                      type: 'magnetize-stopped',
+                      playerId: ws.playerId,
+                      junkIds: stoppedIds
+                    }));
+                  }
+                });
+              }
+            }
+          }
+          break;
+        }
+        
         case 'junk-destroy': {
           // Broadcast junk destruction to all players
           const roomId = playerRooms.get(ws);
@@ -257,6 +388,27 @@ wss.on('connection', (ws) => {
           break;
         }
         
+        case 'junk-hit': {
+          // Broadcast junk hit effects to all players
+          const roomId = playerRooms.get(ws);
+          if (roomId) {
+            const room = rooms.get(roomId);
+            if (room) {
+              room.forEach(other => {
+                if (other.ws !== ws && other.ws.readyState === WebSocket.OPEN) {
+                  other.ws.send(JSON.stringify({
+                    type: 'junk-hit',
+                    junkId: data.junkId,
+                    damage: data.damage,
+                    hitterId: ws.playerId
+                  }));
+                }
+              });
+            }
+          }
+          break;
+        }
+        
         case 'customization-update': {
           // Handle customization update from authenticated user
           const roomId = playerRooms.get(ws);
@@ -264,11 +416,15 @@ wss.on('connection', (ws) => {
             const room = rooms.get(roomId);
             if (room) {
               // Update user's stored customization
-              const user = users.get(ws.userId);
-              if (user) {
-                user.customization = data.customization;
-                console.log(`Updated customization for user ${ws.username}`);
+              if (redisAvailable) {
+                await store.updateUserCustomization(ws.userId, data.customization);
+              } else {
+                const user = memoryUsers.get(ws.userId);
+                if (user) {
+                  user.customization = data.customization;
+                }
               }
+              console.log(`Updated customization for user ${ws.username}`);
               
               // Update player in room
               const player = Array.from(room).find(p => p.ws === ws);
@@ -302,6 +458,12 @@ wss.on('connection', (ws) => {
                 player.position = data.position;
                 player.rotation = data.rotation;
                 
+                // Update magnetizer with new player position
+                const magnetizer = roomMagnetizers.get(roomId);
+                if (magnetizer) {
+                  magnetizer.updatePlayerPosition(ws.playerId, data.position);
+                }
+                
                 // Broadcast to others in room
                 room.forEach(other => {
                   if (other.ws !== ws && other.ws.readyState === WebSocket.OPEN) {
@@ -324,8 +486,14 @@ wss.on('connection', (ws) => {
     }
   });
 
-  ws.on('close', () => {
+  ws.on('close', async () => {
     console.log(`Player ${ws.playerId} disconnected`);
+    
+    // Set user offline in Redis
+    if (redisAvailable && ws.userId) {
+      await store.setUserOffline(ws.userId);
+    }
+    
     leaveRoom(ws, ws.playerId);
   });
 
@@ -451,6 +619,12 @@ function leaveRoom(ws, playerId) {
   }
   playerRooms.delete(ws);
   
+  // Clear magnetization for this player
+  const magnetizer = roomMagnetizers.get(roomId);
+  if (magnetizer) {
+    magnetizer.clearPlayer(playerId);
+  }
+  
   // Notify others
   room.forEach(other => {
     if (other.ws.readyState === WebSocket.OPEN) {
@@ -470,7 +644,7 @@ function leaveRoom(ws, playerId) {
 }
 
 // Authentication functions
-function handleLogin(ws, username) {
+async function handleLogin(ws, username) {
   // Validate username
   if (!username || username.length < 3 || username.length > 20) {
     ws.send(JSON.stringify({
@@ -481,10 +655,17 @@ function handleLogin(ws, username) {
   }
   
   // Check if username is already taken (case-insensitive)
-  const lowerUsername = username.toLowerCase();
-  const existingUser = Array.from(users.values()).find(
-    u => u.username.toLowerCase() === lowerUsername
-  );
+  let existingUser = null;
+  
+  if (redisAvailable) {
+    existingUser = await store.getUserByUsername(username);
+  } else {
+    // Fallback to memory storage
+    const lowerUsername = username.toLowerCase();
+    existingUser = Array.from(memoryUsers.values()).find(
+      u => u.username.toLowerCase() === lowerUsername
+    );
+  }
   
   if (existingUser) {
     ws.send(JSON.stringify({
@@ -495,64 +676,152 @@ function handleLogin(ws, username) {
   }
   
   // Create new user
-  const userId = crypto.randomBytes(16).toString('hex');
-  const token = crypto.randomBytes(32).toString('hex');
+  let userData, token;
   
-  const userData = {
-    userId: userId,
-    username: username,
-    createdAt: Date.now(),
-    customization: null // Will store ship customization here
-  };
-  
-  users.set(userId, userData);
-  sessions.set(token, {
-    userId: userId,
-    username: username,
-    createdAt: Date.now()
-  });
+  if (redisAvailable) {
+    // Use Redis
+    userData = await store.createUser(username);
+    if (!userData) {
+      ws.send(JSON.stringify({
+        type: 'auth-error',
+        error: 'Failed to create user'
+      }));
+      return;
+    }
+    
+    const session = await store.createSession(userData.userId, username);
+    if (!session) {
+      ws.send(JSON.stringify({
+        type: 'auth-error',
+        error: 'Failed to create session'
+      }));
+      return;
+    }
+    token = session.token;
+  } else {
+    // Fallback to memory storage
+    const userId = crypto.randomBytes(16).toString('hex');
+    token = crypto.randomBytes(32).toString('hex');
+    
+    userData = {
+      userId: userId,
+      username: username,
+      createdAt: Date.now(),
+      customization: null
+    };
+    
+    memoryUsers.set(userId, userData);
+    memorySessions.set(token, {
+      userId: userId,
+      username: username,
+      createdAt: Date.now()
+    });
+  }
   
   // Store username on the websocket for later use
   ws.username = username;
-  ws.userId = userId;
+  ws.userId = userData.userId;
   
-  console.log(`User ${username} (${userId}) logged in`);
+  // Set user online
+  if (redisAvailable) {
+    await store.setUserOnline(userData.userId, ws.id || 'ws-' + Date.now());
+  }
+  
+  console.log(`User ${username} (${userData.userId}) logged in`);
   
   ws.send(JSON.stringify({
     type: 'auth-success',
     username: username,
-    userId: userId,
+    userId: userData.userId,
     token: token
   }));
 }
 
-function handleValidateSession(ws, token) {
-  const session = sessions.get(token);
+async function handleValidateSession(ws, token) {
+  let session = null;
   
-  if (session) {
-    // Check if session is still valid (24 hours)
-    const age = Date.now() - session.createdAt;
-    if (age < 24 * 60 * 60 * 1000) {
-      ws.send(JSON.stringify({
-        type: 'auth-valid',
-        username: session.username,
-        userId: session.userId
-      }));
-      
-      // Store username on the websocket
-      ws.username = session.username;
-      ws.userId = session.userId;
-      return;
-    } else {
-      // Session expired
-      sessions.delete(token);
+  if (redisAvailable) {
+    session = await store.getSession(token);
+  } else {
+    // Fallback to memory storage
+    session = memorySessions.get(token);
+    if (session) {
+      // Check if session is still valid (24 hours)
+      const age = Date.now() - session.createdAt;
+      if (age >= 24 * 60 * 60 * 1000) {
+        // Session expired
+        memorySessions.delete(token);
+        session = null;
+      }
     }
   }
   
-  ws.send(JSON.stringify({
-    type: 'auth-invalid'
-  }));
+  if (session) {
+    ws.send(JSON.stringify({
+      type: 'auth-valid',
+      username: session.username,
+      userId: session.userId
+    }));
+    
+    // Store username on the websocket
+    ws.username = session.username;
+    ws.userId = session.userId;
+    
+    // Set user online
+    if (redisAvailable) {
+      await store.setUserOnline(session.userId, ws.id || 'ws-' + Date.now());
+    }
+  } else {
+    ws.send(JSON.stringify({
+      type: 'auth-invalid'
+    }));
+  }
 }
+
+// Physics update loop - runs at 60Hz
+setInterval(() => {
+  const now = Date.now();
+  
+  // Update magnetization physics for each room
+  roomMagnetizers.forEach((magnetizer, roomId) => {
+    const updates = magnetizer.update(now);
+    
+    if (updates.length > 0) {
+      const room = rooms.get(roomId);
+      if (room) {
+        // Broadcast physics updates to all players in room
+        const message = JSON.stringify({
+          type: 'magnetize-physics-update',
+          updates: updates
+        });
+        
+        room.forEach(player => {
+          if (player.ws.readyState === WebSocket.OPEN) {
+            player.ws.send(message);
+          }
+        });
+        
+        // Handle collections
+        updates.forEach(update => {
+          if (update.collected) {
+            // Broadcast collection event
+            const collectionMessage = JSON.stringify({
+              type: 'junk-collect',
+              junkId: update.junkId,
+              collectorId: update.playerId
+            });
+            
+            room.forEach(player => {
+              if (player.ws.readyState === WebSocket.OPEN) {
+                player.ws.send(collectionMessage);
+              }
+            });
+          }
+        });
+      }
+    }
+  });
+}, 1000 / 60); // 60Hz update rate
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
