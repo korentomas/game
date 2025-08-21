@@ -21,6 +21,13 @@ export class ShipCustomizer {
     trail: '#ff6600'       // Orange
   };
   
+  private static classicColors: ShipColors = {
+    primary: '#4fc3f7',    // Light blue (original ship color)
+    secondary: '#00e5ff',  // Cyan
+    engine: '#00e5ff',     // Cyan
+    trail: '#ff6600'       // Orange
+  };
+  
   private static modelConfigs = {
     fighter: {
       scale: 1.0,
@@ -45,6 +52,14 @@ export class ShipCustomizer {
   static getDefault(): ShipCustomization {
     return {
       colors: { ...this.defaultColors },
+      modelType: 'fighter',
+      decalType: 'none'
+    };
+  }
+  
+  static getClassic(): ShipCustomization {
+    return {
+      colors: { ...this.classicColors },
       modelType: 'fighter',
       decalType: 'none'
     };
@@ -183,26 +198,8 @@ export class ShipCustomizer {
   }
   
   private static createFighterGeometry(): THREE.BufferGeometry {
-    // Classic fighter design - balanced
-    const shape = new THREE.Shape();
-    shape.moveTo(0, 0.5);
-    shape.lineTo(-0.4, -0.3);
-    shape.lineTo(-0.2, -0.5);
-    shape.lineTo(0.2, -0.5);
-    shape.lineTo(0.4, -0.3);
-    shape.closePath();
-    
-    const geometry = new THREE.ExtrudeGeometry(shape, {
-      depth: 0.3,
-      bevelEnabled: true,
-      bevelThickness: 0.05,
-      bevelSize: 0.05,
-      bevelSegments: 3
-    });
-    
-    geometry.rotateX(-Math.PI / 2);
-    geometry.scale(2, 2, 2);
-    
+    // Classic box design like the original
+    const geometry = new THREE.BoxGeometry(1, 0.4, 2);
     return geometry;
   }
   

@@ -49,7 +49,7 @@ export function bootstrap() {
   // Load or generate ship customization
   const playerId = 'local'; // Will be replaced with actual player ID when we add auth
   const savedCustomization = ShipCustomizer.loadFromLocalStorage(playerId);
-  const shipCustomization = savedCustomization || ShipCustomizer.generateRandomCustomization();
+  const shipCustomization = savedCustomization || ShipCustomizer.getClassic(); // Use classic look by default
   
   // Save if it was generated
   if (!savedCustomization) {
