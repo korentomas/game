@@ -321,11 +321,11 @@ function joinRoom(ws, playerId, roomId, customization = null) {
   room.add(player);
   playerRooms.set(ws, roomId);
   
-  // Notify player of room join
+  // Notify player of room join with their actual player ID
   ws.send(JSON.stringify({
     type: 'room-joined',
     roomId: roomId,
-    playerId: playerId
+    playerId: player.id  // Send the actual player ID being used
   }));
   
   // Notify player of existing players

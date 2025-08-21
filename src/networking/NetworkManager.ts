@@ -119,6 +119,11 @@ export class NetworkManager {
         
       case 'room-joined':
         console.log('Joined room:', message.roomId);
+        // Update our player ID if it changed (e.g., after authentication)
+        if (message.playerId) {
+          this.localPlayerId = message.playerId;
+          console.log('Updated player ID to:', this.localPlayerId);
+        }
         break;
         
       case 'existing-players':
