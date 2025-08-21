@@ -67,6 +67,7 @@ export class NetworkManager {
   // Junk spawn callback removed - deterministic generation
   private onJunkDestroy?: (junkId: string, destroyerId: string) => void;
   private onJunkHit?: (junkId: string, damage: number, hitterId: string) => void;
+  private onCustomizationLoaded?: (customization: any) => void;
   
   constructor() {}
   
@@ -96,14 +97,15 @@ export class NetworkManager {
     });
   }
   
-  joinRoom(roomId: string = 'default', customization?: any) {
+  joinRoom(roomId: string = 'default', customization?: any, sessionToken?: string) {
     this.roomId = roomId;
     this.localCustomization = customization;
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({
         type: 'join-room',
         roomId: roomId,
-        customization: customization
+        customization: customization,
+        token: sessionToken
       }));
     }
   }
@@ -118,6 +120,20 @@ export class NetworkManager {
         
       case 'room-joined':
         console.log('Joined room:', message.roomId);
+        // Update our player ID if it changed (e.g., after authentication)
+        if (message.playerId) {
+          this.localPlayerId = message.playerId;
+          console.log('Updated player ID to:', this.localPlayerId);
+        }
+        // If server sent customization, it means we have a saved one
+        if (message.customization) {
+          this.localCustomization = message.customization;
+          console.log('Received saved customization from server');
+          // Notify bootstrap to apply it
+          if (this.onCustomizationLoaded) {
+            this.onCustomizationLoaded(message.customization);
+          }
+        }
         break;
         
       case 'existing-players':
@@ -131,13 +147,13 @@ export class NetworkManager {
           console.log('Other players already in room - waiting for junk sync');
         }
         for (const playerData of message.players) {
-          this.addRemotePlayer(playerData.id, playerData.position, playerData.rotation, playerData.customization);
+          this.addRemotePlayer(playerData.id, playerData.position, playerData.rotation, playerData.customization, playerData.username);
         }
         break;
         
       case 'player-joined':
         // New player joined
-        this.addRemotePlayer(message.playerId, message.position, message.rotation, message.customization);
+        this.addRemotePlayer(message.playerId, message.position, message.rotation, message.customization, message.username);
         // Initiate WebRTC connection as the caller
         await this.initiateWebRTC(message.playerId);
         break;
@@ -163,12 +179,23 @@ export class NetworkManager {
         await this.handleICECandidate(message.data, message.from);
         break;
         
+      case 'player-customization-update':
+        // Handle customization update from another player
+        console.log('Received customization update for player:', message.playerId);
+        const playerToUpdate = this.remotePlayers.get(message.playerId);
+        if (playerToUpdate && playerToUpdate.ship) {
+          playerToUpdate.ship.applyCustomization(message.customization);
+          playerToUpdate.customization = message.customization;
+          console.log('Applied customization to remote player:', message.playerId);
+        }
+        break;
+        
       case 'chat-message':
         // Received chat message from another player
-        const player = this.remotePlayers.get(message.playerId);
-        const playerName = player?.name || `Player-${message.playerId.substring(0, 4).toUpperCase()}`;
+        // Use the playerName from the message (sent by server with actual username)
+        const playerName = message.playerName || `Player-${message.playerId.substring(0, 4).toUpperCase()}`;
         console.log('Received chat via WebSocket from', message.playerId, ':', message.text);
-        if (this.onChatMessage && message.playerId !== this.localPlayerId) {
+        if (this.onChatMessage) {
           this.onChatMessage(message.playerId, playerName, message.text);
         }
         break;
@@ -510,6 +537,7 @@ export class NetworkManager {
     
     // Fallback to WebSocket if no data channels are open
     if (!sentViaDataChannel && this.ws?.readyState === WebSocket.OPEN) {
+      // console.log('Sending position via WebSocket fallback');
       this.ws.send(JSON.stringify({
         type: 'position-update',
         position: { x: position.x, y: position.y, z: position.z },
@@ -518,11 +546,15 @@ export class NetworkManager {
     }
   }
   
-  private addRemotePlayer(id: string, position: any, rotation: number, customization?: any) {
-    if (this.remotePlayers.has(id)) return;
+  private addRemotePlayer(id: string, position: any, rotation: number, customization?: any, username?: string) {
+    // If player already exists, remove them first (handles reconnection case)
+    if (this.remotePlayers.has(id)) {
+      console.log(`Player ${id} already exists, removing old instance before adding new one`);
+      this.removeRemotePlayer(id);
+    }
     
-    // Generate a fun name for the player (can be replaced with actual names later)
-    const name = `Player-${id.substring(0, 4).toUpperCase()}`;
+    // Use provided username or fallback to generated name
+    const name = username || `Player-${id.substring(0, 4).toUpperCase()}`;
     
     // Create RemoteShip with customization
     const remoteShip = new RemoteShip(customization);
@@ -555,25 +587,46 @@ export class NetworkManager {
   
   private removeRemotePlayer(id: string) {
     const player = this.remotePlayers.get(id);
-    if (!player) return;
+    if (!player) {
+      console.log('Player already removed:', id);
+      return;
+    }
+    
+    console.log('Removing remote player:', id);
+    
+    // Call the callback BEFORE removing from map so bootstrap can access player data
+    if (this.onPlayerLeft) {
+      this.onPlayerLeft(id);
+    }
     
     // Clean up name tag
     if (player.nameTag) {
       player.nameTag.dispose();
     }
     
-    this.remotePlayers.delete(id);
-    
-    if (this.onPlayerLeft) {
-      this.onPlayerLeft(id);
+    // Clean up WebRTC connections
+    const peer = this.peers.get(id);
+    if (peer) {
+      peer.close();
+      this.peers.delete(id);
     }
     
-    console.log('Removed remote player:', id);
+    const dataChannel = this.dataChannels.get(id);
+    if (dataChannel) {
+      dataChannel.close();
+      this.dataChannels.delete(id);
+    }
+    
+    // Important: Actually remove the player from the map
+    this.remotePlayers.delete(id);
+    
+    console.log('Successfully removed remote player:', id);
   }
   
   private updateRemotePlayer(id: string, position: any, rotation: number, velocity?: any, isThrusting?: boolean) {
     const player = this.remotePlayers.get(id);
     if (!player) {
+      console.log('Player not found for update:', id, 'Available players:', Array.from(this.remotePlayers.keys()));
       // Player doesn't exist yet, add them
       this.addRemotePlayer(id, position, rotation);
       return;
@@ -830,6 +883,7 @@ export class NetworkManager {
     // onJunkSpawn removed - deterministic generation
     onJunkDestroy?: (junkId: string, destroyerId: string) => void;
     onJunkHit?: (junkId: string, damage: number, hitterId: string) => void;
+    onCustomizationLoaded?: (customization: any) => void;
   }) {
     this.onPlayerJoined = callbacks.onPlayerJoined;
     this.onPlayerLeft = callbacks.onPlayerLeft;
@@ -842,6 +896,7 @@ export class NetworkManager {
     // onJunkSpawn removed - deterministic generation
     this.onJunkDestroy = callbacks.onJunkDestroy;
     this.onJunkHit = callbacks.onJunkHit;
+    this.onCustomizationLoaded = callbacks.onCustomizationLoaded;
   }
   
   disconnect() {

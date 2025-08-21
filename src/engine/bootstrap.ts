@@ -21,10 +21,54 @@ import { MaterialManager } from '../items/MaterialManager';
 import { MaterialType } from '../items/MaterialDrop';
 import { HUD } from '../ui/HUD';
 import { CustomizationMenu } from '../ui/CustomizationMenu';
+import { LoginScreen } from '../ui/LoginScreen';
+import { AuthManager } from '../auth/AuthManager';
+import { SyncOverlay } from '../ui/SyncOverlay';
 
-export function bootstrap() {
+export async function bootstrap() {
   const appEl = document.getElementById('app')!;
   const uiEl = document.getElementById('ui')!;
+
+  // Initialize auth manager
+  const authManager = new AuthManager();
+  let userSession = authManager.getSession();
+  
+  // Check if we have a valid session
+  if (userSession) {
+    const isValid = await authManager.validateSession();
+    if (!isValid) {
+      userSession = null;
+    }
+  }
+  
+  // Show login screen if not authenticated
+  if (!userSession) {
+    const loginScreen = new LoginScreen();
+    
+    // Wait for login
+    userSession = await new Promise<any>((resolve, reject) => {
+      loginScreen.setOnLogin(async (username) => {
+        try {
+          const session = await authManager.login(username);
+          loginScreen.hide();
+          resolve(session);
+        } catch (error: any) {
+          loginScreen.showLoginError(error.message || 'Login failed');
+          // Don't resolve, let user try again
+        }
+      });
+    });
+  }
+  
+  console.log(`Logged in as ${userSession.username} (${userSession.userId})`);
+  
+  // Show sync overlay
+  const syncOverlay = new SyncOverlay();
+  syncOverlay.show();
+  syncOverlay.updateStatus('authenticated');
+  
+  // Flag to control input during sync
+  let isSyncing = true;
 
   const pixelScale = 3; // retro upscale factor
   const baseWidth = Math.floor(window.innerWidth / pixelScale);
@@ -48,11 +92,12 @@ export function bootstrap() {
   const input = new Input();
   
   // Load or generate ship customization
-  const playerId = 'local'; // Will be replaced with actual player ID when we add auth
+  const playerId = userSession.userId;
   const savedCustomization = ShipCustomizer.loadFromLocalStorage(playerId);
+  // Don't use a default here - let the server provide the saved one or use default there
   const shipCustomization = savedCustomization || ShipCustomizer.getClassic(); // Use classic look by default
   
-  // Save if it was generated
+  // Save if it was generated (this will be overridden by server if user has saved customization)
   if (!savedCustomization) {
     ShipCustomizer.saveToLocalStorage(playerId, shipCustomization);
   }
@@ -65,9 +110,11 @@ export function bootstrap() {
   customizationMenu.setInputSystem(input); // Pass input system to clear keys when opening
   customizationMenu.setOnCustomizationChange((newCustomization) => {
     ship.applyCustomization(newCustomization);
+    // Save to localStorage with correct userId
+    ShipCustomizer.saveToLocalStorage(playerId, newCustomization);
     // Also update network manager if connected
     networkManager.localCustomization = newCustomization;
-    // Send customization update to other players
+    // Send customization update to other players and server
     networkManager.sendCustomizationUpdate(newCustomization);
   });
 
@@ -125,6 +172,12 @@ export function bootstrap() {
   
   // Set up network callbacks
   networkManager.setCallbacks({
+    onCustomizationLoaded: (customization) => {
+      // Server sent us our saved customization
+      console.log('Applying saved customization from server');
+      ship.applyCustomization(customization);
+      ShipCustomizer.saveToLocalStorage(playerId, customization);
+    },
     onPlayerJoined: (player) => {
       scene.add(player.group);
       // Add particle system to scene
@@ -141,18 +194,53 @@ export function bootstrap() {
     onPlayerLeft: (playerId) => {
       const player = networkManager.remotePlayers.get(playerId);
       if (player) {
-        scene.remove(player.group);
+        try {
+          // Remove from scene
+          scene.remove(player.group);
+        
         // Remove particle system from scene
-        if (player.ship) {
+        if (player.ship && player.ship.thrusterSystem) {
           scene.remove(player.ship.thrusterSystem.points);
+          // Dispose of thruster Points object's geometry and material
+          if (player.ship.thrusterSystem.points.geometry) {
+            player.ship.thrusterSystem.points.geometry.dispose();
+          }
+          if (player.ship.thrusterSystem.points.material) {
+            const material = player.ship.thrusterSystem.points.material;
+            if (Array.isArray(material)) {
+              material.forEach(mat => mat.dispose());
+            } else {
+              material.dispose();
+            }
+          }
         }
+        
         // Remove name tag from scene
         if (player.nameTagGroup) {
           scene.remove(player.nameTagGroup);
         }
-        // Removed system message for cleaner chat
+        
+        // Dispose of ship geometries and materials
+        player.group.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) {
+              if (Array.isArray(child.material)) {
+                child.material.forEach(mat => mat.dispose());
+              } else {
+                child.material.dispose();
+              }
+            }
+          }
+        });
+        
+        console.log('Cleaned up disconnected player:', playerId);
+        } catch (error) {
+          console.error('Error during player cleanup:', error);
+        }
+      } else {
+        console.warn('Player already removed:', playerId);
       }
-      console.log('Remote player left:', playerId);
     },
     onChatMessage: (playerId, playerName, text) => {
       // Add to chat history
@@ -220,7 +308,7 @@ export function bootstrap() {
   
   // Setup chat callbacks
   chat.setOnSendMessage((text) => {
-    const localPlayerName = networkManager.localPlayerName || 'You';
+    const localPlayerName = userSession.username;
     
     // Add the message to our own chat immediately
     chat.addMessage({
@@ -240,18 +328,45 @@ export function bootstrap() {
   
   // Connect to multiplayer (always, since we always have a room now)
   if (room) {
+    syncOverlay.updateStatus('connecting');
     networkManager.connect().then(() => {
-      networkManager.joinRoom(room, shipCustomization);
-      // Show welcome tips in chat
-      chat.addSystemMessage(`Press T to open chat, C to customize ship`);
+      syncOverlay.updateStatus('roomJoined');
+      networkManager.joinRoom(room, shipCustomization, userSession.token);
+      
+      // Wait a bit for players to load
+      setTimeout(() => {
+        syncOverlay.updateStatus('playersLoaded');
+        
+        // Final sync step
+        setTimeout(() => {
+          syncOverlay.updateStatus('worldSynced');
+          // Enable controls after sync completes
+          setTimeout(() => {
+            isSyncing = false;
+            chat.addSystemMessage(`Welcome ${userSession.username}! Press T to open chat, C to customize ship`);
+          }, 1400);
+        }, 300);
+      }, 400);
+      
       // Set player ID for material manager
       materialManager.setPlayerId(networkManager.localPlayerId);
       // Junk generation is now deterministic - all players generate the same junk locally
     }).catch(err => {
       console.error('Failed to connect to multiplayer:', err);
+      syncOverlay.forceComplete();
+      isSyncing = false;
       // Removed system message for cleaner chat
       // Junk generation works offline too (deterministic)
     });
+  } else {
+    // Offline mode - complete sync quickly
+    syncOverlay.updateStatus('connecting');
+    syncOverlay.updateStatus('roomJoined');
+    syncOverlay.updateStatus('playersLoaded');
+    syncOverlay.updateStatus('worldSynced');
+    setTimeout(() => {
+      isSyncing = false;
+    }, 1200);
   }
 
   // Add some ambient neon accent lights - moderate intensity for atmosphere
@@ -420,11 +535,12 @@ export function bootstrap() {
     last = now;
 
     // Core game updates (high priority)
-    ship.update(dt, input, world, junk);
+    // Only process ship input if not syncing
+    ship.update(dt, isSyncing ? new Input() : input, world, junk);
     rig.update(dt);
     
-    // Handle shooting
-    if (input.isDown(' ') || input.isDown('mouse0')) {
+    // Handle shooting (only if not syncing)
+    if (!isSyncing && (input.isDown(' ') || input.isDown('mouse0'))) {
       const projectileId = ship.tryFire(projectileManager, world);
       // Send shoot event over network
       if (projectileId && room) {
