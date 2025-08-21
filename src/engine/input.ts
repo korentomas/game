@@ -6,8 +6,20 @@ export class Input {
   public mouseDeltaY = 0;
 
   constructor() {
-    addEventListener('keydown', e => this.keys.add(e.key.toLowerCase()));
-    addEventListener('keyup', e => this.keys.delete(e.key.toLowerCase()));
+    addEventListener('keydown', e => {
+      // Don't capture keys when typing in input fields
+      if (document.activeElement && 
+          (document.activeElement.tagName === 'INPUT' || 
+           document.activeElement.tagName === 'TEXTAREA')) {
+        return;
+      }
+      this.keys.add(e.key.toLowerCase());
+    });
+    
+    addEventListener('keyup', e => {
+      // Always remove keys on keyup to prevent stuck keys
+      this.keys.delete(e.key.toLowerCase());
+    });
 
     addEventListener('mousedown', e => {
       this.mouseButtons.add(e.button);
