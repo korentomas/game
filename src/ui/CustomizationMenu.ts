@@ -23,8 +23,9 @@ export class CustomizationMenu {
   
   private setupKeyboardControls() {
     document.addEventListener('keydown', (e) => {
-      // If menu is visible, stop all game controls except ESC
+      // If menu is visible, handle keyboard events
       if (this.isVisible) {
+        // Always allow ESC to close
         if (e.key === 'Escape') {
           e.preventDefault();
           e.stopPropagation();
@@ -32,11 +33,15 @@ export class CustomizationMenu {
           return;
         }
         
-        // Block all other game controls when menu is open
-        // This prevents T from opening chat, etc.
-        if (!this.isInputFocused() || e.key !== 'Tab') {
-          e.stopPropagation();
+        // If terminal input is focused, let it handle its own events
+        if (document.activeElement === this.terminalInput) {
+          // Don't block anything - let terminal input handle it
+          return;
         }
+        
+        // Otherwise block all game controls when menu is open
+        e.stopPropagation();
+        e.preventDefault();
         return;
       }
       
