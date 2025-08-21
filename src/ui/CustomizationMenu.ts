@@ -6,17 +6,71 @@ export class CustomizationMenu {
   private isVisible = false;
   private onCustomizationChange?: (customization: ShipCustomization) => void;
   private currentCustomization: ShipCustomization;
+  private selectedCategory = 0;
+  private selectedOption = 0;
+  private categories = ['model', 'hull', 'engine', 'decal'];
+  private categoryOptions: Record<string, string[]> = {
+    model: ['fighter', 'cruiser', 'speeder'],
+    hull: ['#4fc3f7', '#ff4444', '#44ff44', '#ffff44', '#ff44ff', '#44ffff', '#ff8800', '#8844ff'],
+    engine: ['#00e5ff', '#ff00ff', '#00ff00', '#ffff00', '#ff8800', '#ff0000', '#0088ff', '#ffffff'],
+    decal: ['none', 'stripes', 'flames', 'stars']
+  };
   
   constructor() {
     this.currentCustomization = ShipCustomizer.getClassic();
     this.container = this.createMenu();
     document.body.appendChild(this.container);
     
-    // Toggle with C key
+    // Setup keyboard controls
+    this.setupKeyboardControls();
+  }
+  
+  private setupKeyboardControls() {
     document.addEventListener('keydown', (e) => {
+      // Toggle with C key
       if (e.key === 'c' && !this.isInputFocused()) {
         e.preventDefault();
         this.toggle();
+        return;
+      }
+      
+      // Only process navigation if menu is visible
+      if (!this.isVisible) return;
+      
+      switch(e.key) {
+        case 'ArrowUp':
+        case 'w':
+          e.preventDefault();
+          this.navigateCategory(-1);
+          break;
+        case 'ArrowDown':
+        case 's':
+          e.preventDefault();
+          this.navigateCategory(1);
+          break;
+        case 'ArrowLeft':
+        case 'a':
+          e.preventDefault();
+          this.navigateOption(-1);
+          break;
+        case 'ArrowRight':
+        case 'd':
+          e.preventDefault();
+          this.navigateOption(1);
+          break;
+        case 'Enter':
+        case ' ':
+          e.preventDefault();
+          this.selectCurrentOption();
+          break;
+        case 'r':
+          e.preventDefault();
+          this.randomize();
+          break;
+        case 'Escape':
+          e.preventDefault();
+          this.hide();
+          break;
       }
     });
   }
@@ -24,6 +78,84 @@ export class CustomizationMenu {
   private isInputFocused(): boolean {
     const activeElement = document.activeElement;
     return activeElement?.tagName === 'INPUT' || activeElement?.tagName === 'TEXTAREA';
+  }
+  
+  private navigateCategory(direction: number) {
+    this.selectedCategory = (this.selectedCategory + direction + this.categories.length) % this.categories.length;
+    this.selectedOption = 0; // Reset option selection when changing category
+    this.updateVisualSelection();
+  }
+  
+  private navigateOption(direction: number) {
+    const category = this.categories[this.selectedCategory];
+    const options = this.categoryOptions[category];
+    this.selectedOption = (this.selectedOption + direction + options.length) % options.length;
+    this.updateVisualSelection();
+  }
+  
+  private selectCurrentOption() {
+    const category = this.categories[this.selectedCategory];
+    const options = this.categoryOptions[category];
+    const selectedValue = options[this.selectedOption];
+    
+    switch(category) {
+      case 'model':
+        this.currentCustomization.modelType = selectedValue as 'fighter' | 'cruiser' | 'speeder';
+        this.updateModelButtons(this.container);
+        break;
+      case 'hull':
+        this.currentCustomization.colors.primary = selectedValue;
+        this.updateColorButtons(this.container);
+        break;
+      case 'engine':
+        this.currentCustomization.colors.engine = selectedValue;
+        this.currentCustomization.colors.trail = selectedValue;
+        this.updateColorButtons(this.container);
+        break;
+      case 'decal':
+        this.currentCustomization.decalType = selectedValue as 'none' | 'stripes' | 'flames' | 'stars';
+        this.updateDecalButtons(this.container);
+        break;
+    }
+  }
+  
+  private randomize() {
+    this.currentCustomization = ShipCustomizer.generateRandomCustomization();
+    this.updateAllButtons(this.container);
+  }
+  
+  private updateVisualSelection() {
+    // Remove all selection highlights
+    this.container.querySelectorAll('.category-row').forEach((row, idx) => {
+      if (idx === this.selectedCategory) {
+        (row as HTMLElement).style.outline = '2px solid #00e5ff';
+        (row as HTMLElement).style.outlineOffset = '2px';
+      } else {
+        (row as HTMLElement).style.outline = 'none';
+      }
+    });
+    
+    // Highlight selected option within category
+    const category = this.categories[this.selectedCategory];
+    const categorySelectors: Record<string, string> = {
+      'model': '.model-btn',
+      'hull': '.color-btn[data-type="primary"]',
+      'engine': '.color-btn[data-type="engine"]',
+      'decal': '.decal-btn'
+    };
+    
+    const selector = categorySelectors[category];
+    if (selector) {
+      this.container.querySelectorAll(selector).forEach((btn, idx) => {
+        if (idx === this.selectedOption) {
+          (btn as HTMLElement).style.boxShadow = '0 0 10px #00e5ff, inset 0 0 5px #00e5ff';
+          (btn as HTMLElement).style.transform = 'scale(1.1)';
+        } else {
+          (btn as HTMLElement).style.boxShadow = 'none';
+          (btn as HTMLElement).style.transform = 'scale(1)';
+        }
+      });
+    }
   }
   
   private createMenu(): HTMLDivElement {
@@ -50,7 +182,15 @@ export class CustomizationMenu {
         SHIP CUSTOMIZATION
       </h2>
       
-      <div style="margin-bottom: 20px;">
+      <div style="margin-bottom: 15px; padding: 10px; background: rgba(0, 232, 255, 0.1); border-radius: 4px; text-align: center;">
+        <div style="color: #00e5ff; font-size: 9px; margin-bottom: 5px;">KEYBOARD CONTROLS</div>
+        <div style="color: white; font-size: 8px; line-height: 1.4;">
+          ↑↓/WS: Select Category | ←→/AD: Choose Option<br>
+          SPACE/ENTER: Apply Selection | R: Random | ESC: Close
+        </div>
+      </div>
+      
+      <div class="category-row" style="margin-bottom: 20px; padding: 5px; border-radius: 4px;">
         <label style="display: block; margin-bottom: 10px; color: #00e5ff;">Ship Model:</label>
         <div style="display: flex; gap: 10px;">
           <button class="model-btn" data-model="fighter" style="${this.getButtonStyle(true)}">Fighter</button>
@@ -59,7 +199,7 @@ export class CustomizationMenu {
         </div>
       </div>
       
-      <div style="margin-bottom: 20px;">
+      <div class="category-row" style="margin-bottom: 20px; padding: 5px; border-radius: 4px;">
         <label style="display: block; margin-bottom: 10px; color: #00e5ff;">Hull Color:</label>
         <div style="display: flex; gap: 10px; flex-wrap: wrap;">
           ${this.createColorButtons('primary', [
@@ -69,7 +209,7 @@ export class CustomizationMenu {
         </div>
       </div>
       
-      <div style="margin-bottom: 20px;">
+      <div class="category-row" style="margin-bottom: 20px; padding: 5px; border-radius: 4px;">
         <label style="display: block; margin-bottom: 10px; color: #00e5ff;">Engine Glow:</label>
         <div style="display: flex; gap: 10px; flex-wrap: wrap;">
           ${this.createColorButtons('engine', [
@@ -79,7 +219,7 @@ export class CustomizationMenu {
         </div>
       </div>
       
-      <div style="margin-bottom: 20px;">
+      <div class="category-row" style="margin-bottom: 20px; padding: 5px; border-radius: 4px;">
         <label style="display: block; margin-bottom: 10px; color: #00e5ff;">Decal:</label>
         <div style="display: flex; gap: 10px;">
           <button class="decal-btn" data-decal="none" style="${this.getButtonStyle(true)}">None</button>
@@ -90,10 +230,10 @@ export class CustomizationMenu {
       </div>
       
       <div style="display: flex; gap: 10px; margin-top: 30px;">
-        <button id="apply-btn" style="${this.getButtonStyle(false, true)}">Apply</button>
-        <button id="random-btn" style="${this.getButtonStyle()}">Random</button>
+        <button id="apply-btn" style="${this.getButtonStyle(false, true)}">Apply (Enter)</button>
+        <button id="random-btn" style="${this.getButtonStyle()}">Random (R)</button>
         <button id="classic-btn" style="${this.getButtonStyle()}">Classic</button>
-        <button id="close-btn" style="${this.getButtonStyle()}">Close (C)</button>
+        <button id="close-btn" style="${this.getButtonStyle()}">Close (ESC)</button>
       </div>
       
       <div style="margin-top: 15px; text-align: center; color: #888; font-size: 8px;">
@@ -253,6 +393,11 @@ export class CustomizationMenu {
       this.currentCustomization = saved;
       this.updateAllButtons(this.container);
     }
+    
+    // Initialize visual selection
+    this.selectedCategory = 0;
+    this.selectedOption = 0;
+    this.updateVisualSelection();
   }
   
   hide() {
