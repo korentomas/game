@@ -23,6 +23,7 @@ import { HUD } from '../ui/HUD';
 import { CustomizationMenu } from '../ui/CustomizationMenu';
 import { LoginScreen } from '../ui/LoginScreen';
 import { AuthManager } from '../auth/AuthManager';
+import { SyncOverlay } from '../ui/SyncOverlay';
 
 export async function bootstrap() {
   const appEl = document.getElementById('app')!;
@@ -60,6 +61,14 @@ export async function bootstrap() {
   }
   
   console.log(`Logged in as ${userSession.username} (${userSession.userId})`);
+  
+  // Show sync overlay
+  const syncOverlay = new SyncOverlay();
+  syncOverlay.show();
+  syncOverlay.updateStatus('authenticated');
+  
+  // Flag to control input during sync
+  let isSyncing = true;
 
   const pixelScale = 3; // retro upscale factor
   const baseWidth = Math.floor(window.innerWidth / pixelScale);
@@ -185,18 +194,53 @@ export async function bootstrap() {
     onPlayerLeft: (playerId) => {
       const player = networkManager.remotePlayers.get(playerId);
       if (player) {
-        scene.remove(player.group);
+        try {
+          // Remove from scene
+          scene.remove(player.group);
+        
         // Remove particle system from scene
-        if (player.ship) {
+        if (player.ship && player.ship.thrusterSystem) {
           scene.remove(player.ship.thrusterSystem.points);
+          // Dispose of thruster Points object's geometry and material
+          if (player.ship.thrusterSystem.points.geometry) {
+            player.ship.thrusterSystem.points.geometry.dispose();
+          }
+          if (player.ship.thrusterSystem.points.material) {
+            const material = player.ship.thrusterSystem.points.material;
+            if (Array.isArray(material)) {
+              material.forEach(mat => mat.dispose());
+            } else {
+              material.dispose();
+            }
+          }
         }
+        
         // Remove name tag from scene
         if (player.nameTagGroup) {
           scene.remove(player.nameTagGroup);
         }
-        // Removed system message for cleaner chat
+        
+        // Dispose of ship geometries and materials
+        player.group.traverse((child) => {
+          if (child instanceof THREE.Mesh) {
+            if (child.geometry) child.geometry.dispose();
+            if (child.material) {
+              if (Array.isArray(child.material)) {
+                child.material.forEach(mat => mat.dispose());
+              } else {
+                child.material.dispose();
+              }
+            }
+          }
+        });
+        
+        console.log('Cleaned up disconnected player:', playerId);
+        } catch (error) {
+          console.error('Error during player cleanup:', error);
+        }
+      } else {
+        console.warn('Player already removed:', playerId);
       }
-      console.log('Remote player left:', playerId);
     },
     onChatMessage: (playerId, playerName, text) => {
       // Add to chat history
@@ -284,18 +328,45 @@ export async function bootstrap() {
   
   // Connect to multiplayer (always, since we always have a room now)
   if (room) {
+    syncOverlay.updateStatus('connecting');
     networkManager.connect().then(() => {
+      syncOverlay.updateStatus('roomJoined');
       networkManager.joinRoom(room, shipCustomization, userSession.token);
-      // Show welcome tips in chat
-      chat.addSystemMessage(`Welcome ${userSession.username}! Press T to open chat, C to customize ship`);
+      
+      // Wait a bit for players to load
+      setTimeout(() => {
+        syncOverlay.updateStatus('playersLoaded');
+        
+        // Final sync step
+        setTimeout(() => {
+          syncOverlay.updateStatus('worldSynced');
+          // Enable controls after sync completes
+          setTimeout(() => {
+            isSyncing = false;
+            chat.addSystemMessage(`Welcome ${userSession.username}! Press T to open chat, C to customize ship`);
+          }, 1400);
+        }, 300);
+      }, 400);
+      
       // Set player ID for material manager
       materialManager.setPlayerId(networkManager.localPlayerId);
       // Junk generation is now deterministic - all players generate the same junk locally
     }).catch(err => {
       console.error('Failed to connect to multiplayer:', err);
+      syncOverlay.forceComplete();
+      isSyncing = false;
       // Removed system message for cleaner chat
       // Junk generation works offline too (deterministic)
     });
+  } else {
+    // Offline mode - complete sync quickly
+    syncOverlay.updateStatus('connecting');
+    syncOverlay.updateStatus('roomJoined');
+    syncOverlay.updateStatus('playersLoaded');
+    syncOverlay.updateStatus('worldSynced');
+    setTimeout(() => {
+      isSyncing = false;
+    }, 1200);
   }
 
   // Add some ambient neon accent lights - moderate intensity for atmosphere
@@ -464,11 +535,12 @@ export async function bootstrap() {
     last = now;
 
     // Core game updates (high priority)
-    ship.update(dt, input, world, junk);
+    // Only process ship input if not syncing
+    ship.update(dt, isSyncing ? new Input() : input, world, junk);
     rig.update(dt);
     
-    // Handle shooting
-    if (input.isDown(' ') || input.isDown('mouse0')) {
+    // Handle shooting (only if not syncing)
+    if (!isSyncing && (input.isDown(' ') || input.isDown('mouse0'))) {
       const projectileId = ship.tryFire(projectileManager, world);
       // Send shoot event over network
       if (projectileId && room) {

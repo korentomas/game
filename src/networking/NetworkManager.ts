@@ -547,7 +547,11 @@ export class NetworkManager {
   }
   
   private addRemotePlayer(id: string, position: any, rotation: number, customization?: any, username?: string) {
-    if (this.remotePlayers.has(id)) return;
+    // If player already exists, remove them first (handles reconnection case)
+    if (this.remotePlayers.has(id)) {
+      console.log(`Player ${id} already exists, removing old instance before adding new one`);
+      this.removeRemotePlayer(id);
+    }
     
     // Use provided username or fallback to generated name
     const name = username || `Player-${id.substring(0, 4).toUpperCase()}`;
@@ -583,20 +587,40 @@ export class NetworkManager {
   
   private removeRemotePlayer(id: string) {
     const player = this.remotePlayers.get(id);
-    if (!player) return;
+    if (!player) {
+      console.log('Player already removed:', id);
+      return;
+    }
+    
+    console.log('Removing remote player:', id);
+    
+    // Call the callback BEFORE removing from map so bootstrap can access player data
+    if (this.onPlayerLeft) {
+      this.onPlayerLeft(id);
+    }
     
     // Clean up name tag
     if (player.nameTag) {
       player.nameTag.dispose();
     }
     
-    this.remotePlayers.delete(id);
-    
-    if (this.onPlayerLeft) {
-      this.onPlayerLeft(id);
+    // Clean up WebRTC connections
+    const peer = this.peers.get(id);
+    if (peer) {
+      peer.close();
+      this.peers.delete(id);
     }
     
-    console.log('Removed remote player:', id);
+    const dataChannel = this.dataChannels.get(id);
+    if (dataChannel) {
+      dataChannel.close();
+      this.dataChannels.delete(id);
+    }
+    
+    // Important: Actually remove the player from the map
+    this.remotePlayers.delete(id);
+    
+    console.log('Successfully removed remote player:', id);
   }
   
   private updateRemotePlayer(id: string, position: any, rotation: number, velocity?: any, isThrusting?: boolean) {

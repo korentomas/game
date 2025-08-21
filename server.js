@@ -349,11 +349,31 @@ function joinRoom(ws, playerId, roomId, customization = null) {
   
   // Check if this player ID is already in the room (reconnection)
   const existingPlayer = Array.from(room).find(p => p.id === playerId);
+  const wasReconnection = !!existingPlayer; // Store this for later use
   if (existingPlayer) {
+    console.log(`Found stale connection for player ${playerId}, cleaning up...`);
+    
+    // Notify all other players that this player left (forces cleanup)
+    room.forEach(other => {
+      if (other.ws !== existingPlayer.ws && other.ws.readyState === WebSocket.OPEN) {
+        other.ws.send(JSON.stringify({
+          type: 'player-left',
+          playerId: playerId
+        }));
+      }
+    });
+    
     // Remove the old connection
     room.delete(existingPlayer);
     playerRooms.delete(existingPlayer.ws);
-    console.log(`Removed stale connection for player ${playerId}`);
+    
+    // Close the stale websocket if it's still open
+    if (existingPlayer.ws.readyState === WebSocket.OPEN || 
+        existingPlayer.ws.readyState === WebSocket.CONNECTING) {
+      existingPlayer.ws.close();
+    }
+    
+    console.log(`Cleaned up stale connection for player ${playerId}`);
   }
   // Get username from session if available
   const username = ws.username || null;
@@ -376,8 +396,10 @@ function joinRoom(ws, playerId, roomId, customization = null) {
   
   ws.send(JSON.stringify(joinMessage));
   
-  // Notify player of existing players
-  const otherPlayers = Array.from(room)
+  // Small delay before sending existing players to allow client sync overlay to show
+  setTimeout(() => {
+    // Notify player of existing players
+    const otherPlayers = Array.from(room)
     .filter(p => p.ws !== ws)
     .map(p => ({
       id: p.id,
@@ -387,26 +409,30 @@ function joinRoom(ws, playerId, roomId, customization = null) {
       customization: p.customization
     }));
     
-  if (otherPlayers.length > 0) {
-    ws.send(JSON.stringify({
-      type: 'existing-players',
-      players: otherPlayers
-    }));
-  }
-  
-  // Notify others of new player
-  room.forEach(other => {
-    if (other.ws !== ws && other.ws.readyState === WebSocket.OPEN) {
-      other.ws.send(JSON.stringify({
-        type: 'player-joined',
-        playerId: player.id,
-        username: player.username,
-        position: player.position,
-        rotation: player.rotation,
-        customization: player.customization
+    if (otherPlayers.length > 0) {
+      ws.send(JSON.stringify({
+        type: 'existing-players',
+        players: otherPlayers
       }));
     }
-  });
+  }, 200); // 200ms delay for sync overlay
+  
+  // Notify others of new player (with small delay if it was a reconnection)
+  const notifyDelay = wasReconnection ? 100 : 0; // 100ms delay if reconnecting
+  setTimeout(() => {
+    room.forEach(other => {
+      if (other.ws !== ws && other.ws.readyState === WebSocket.OPEN) {
+        other.ws.send(JSON.stringify({
+          type: 'player-joined',
+          playerId: player.id,
+          username: player.username,
+          position: player.position,
+          rotation: player.rotation,
+          customization: player.customization
+        }));
+      }
+    });
+  }, notifyDelay);
   
   console.log(`Player ${playerId} joined room ${roomId}. Room now has ${room.size} players`);
 }
