@@ -179,26 +179,53 @@ export class Chat {
   }
   
   private setupEventHandlers() {
-    // Toggle chat with T key
+    // Toggle chat with T key - use capture phase to intercept before game
     document.addEventListener('keydown', (e) => {
-      if (e.key === 't' && !this.isVisible) {
+      // Don't open chat if already typing in an input
+      const activeElement = document.activeElement;
+      const isInputFocused = activeElement?.tagName === 'INPUT' || activeElement?.tagName === 'TEXTAREA';
+      
+      if (e.key === 't' && !this.isVisible && !isInputFocused) {
         e.preventDefault();
+        e.stopPropagation();
         this.show();
       } else if (e.key === 'Escape' && this.isVisible) {
+        e.preventDefault();
+        e.stopPropagation();
         this.hide();
       }
-    });
+    }, true); // Use capture phase
     
     // Send message on Enter
     this.inputEl.addEventListener('keydown', (e) => {
+      // Stop all game controls while typing
+      e.stopPropagation();
+      
       if (e.key === 'Enter') {
         e.preventDefault();
         const text = this.inputEl.value.trim();
         if (text && this.onSendMessage) {
           this.onSendMessage(text);
           this.inputEl.value = '';
+          // Hide chat after sending message
+          this.hide();
+        } else if (!text) {
+          // If Enter pressed with empty input, just close chat
+          this.hide();
         }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        this.hide();
       }
+    });
+    
+    // Also stop keyup and keypress events from propagating
+    this.inputEl.addEventListener('keyup', (e) => {
+      e.stopPropagation();
+    });
+    
+    this.inputEl.addEventListener('keypress', (e) => {
+      e.stopPropagation();
     });
   }
   
