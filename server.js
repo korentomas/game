@@ -27,6 +27,7 @@ class Player {
 wss.on('connection', (ws) => {
   // Generate a temporary ID - will be replaced with userId if authenticated
   let playerId = Math.random().toString(36).substr(2, 9);
+  ws.playerId = playerId; // Store on ws object so it persists
   console.log(`Connection ${playerId} established`);
 
   ws.on('message', (message) => {
@@ -55,7 +56,8 @@ wss.on('connection', (ws) => {
               // Valid session - use userId as playerId for consistency
               ws.username = session.username;
               ws.userId = session.userId;
-              playerId = session.userId; // Use userId as playerId so refreshes keep same ID
+              ws.playerId = session.userId; // Use userId as playerId so refreshes keep same ID
+              playerId = session.userId; // Update local variable too
             }
           }
           
@@ -78,7 +80,7 @@ wss.on('connection', (ws) => {
                   targetPlayer.ws.send(JSON.stringify({
                     type: data.type,
                     data: data.data,
-                    from: playerId
+                    from: ws.playerId
                   }));
                 }
               } else {
@@ -88,7 +90,7 @@ wss.on('connection', (ws) => {
                     player.ws.send(JSON.stringify({
                       type: data.type,
                       data: data.data,
-                      from: playerId
+                      from: ws.playerId
                     }));
                   }
                 });
@@ -112,7 +114,7 @@ wss.on('connection', (ws) => {
                 if (player.ws.readyState === WebSocket.OPEN) {
                   player.ws.send(JSON.stringify({
                     type: 'chat-message',
-                    playerId: playerId,
+                    playerId: ws.playerId,
                     playerName: senderName,
                     text: data.text
                   }));
@@ -133,7 +135,7 @@ wss.on('connection', (ws) => {
                 if (other.ws !== ws && other.ws.readyState === WebSocket.OPEN) {
                   other.ws.send(JSON.stringify({
                     type: 'shoot',
-                    playerId: playerId,
+                    playerId: ws.playerId,
                     position: data.position,
                     heading: data.heading
                   }));
@@ -154,7 +156,7 @@ wss.on('connection', (ws) => {
                 if (other.ws !== ws && other.ws.readyState === WebSocket.OPEN) {
                   other.ws.send(JSON.stringify({
                     type: 'junk-collected',
-                    playerId: playerId,
+                    playerId: ws.playerId,
                     chunkKey: data.chunkKey,
                     junkIndex: data.junkIndex
                   }));
@@ -178,7 +180,7 @@ wss.on('connection', (ws) => {
                     id: data.id,
                     position: data.position,
                     materialType: data.materialType,
-                    spawnerId: playerId
+                    spawnerId: ws.playerId
                   }));
                 }
               });
@@ -198,7 +200,7 @@ wss.on('connection', (ws) => {
                   other.ws.send(JSON.stringify({
                     type: 'material-collect',
                     id: data.id,
-                    collectorId: data.collectorId || playerId
+                    collectorId: data.collectorId || ws.playerId
                   }));
                 }
               });
@@ -219,7 +221,7 @@ wss.on('connection', (ws) => {
                     type: 'junk-spawn',
                     chunkKey: data.chunkKey,
                     junkData: data.junkData,
-                    spawnerId: playerId
+                    spawnerId: ws.playerId
                   }));
                 }
               });
@@ -239,7 +241,7 @@ wss.on('connection', (ws) => {
                   other.ws.send(JSON.stringify({
                     type: 'junk-destroy',
                     junkId: data.junkId,
-                    destroyerId: playerId
+                    destroyerId: ws.playerId
                   }));
                 }
               });
@@ -264,7 +266,7 @@ wss.on('connection', (ws) => {
                   if (other.ws !== ws && other.ws.readyState === WebSocket.OPEN) {
                     other.ws.send(JSON.stringify({
                       type: 'player-update',
-                      playerId: playerId,
+                      playerId: ws.playerId,
                       position: data.position,
                       rotation: data.rotation
                     }));
@@ -282,14 +284,14 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
-    console.log(`Player ${playerId} disconnected`);
-    leaveRoom(ws, playerId);
+    console.log(`Player ${ws.playerId} disconnected`);
+    leaveRoom(ws, ws.playerId);
   });
 
   // Send player their ID
   ws.send(JSON.stringify({
     type: 'welcome',
-    playerId: playerId
+    playerId: ws.playerId
   }));
 });
 
@@ -349,7 +351,7 @@ function joinRoom(ws, playerId, roomId, customization = null) {
     if (other.ws !== ws && other.ws.readyState === WebSocket.OPEN) {
       other.ws.send(JSON.stringify({
         type: 'player-joined',
-        playerId: playerId,
+        playerId: player.id,
         username: player.username,
         position: player.position,
         rotation: player.rotation,
@@ -380,7 +382,7 @@ function leaveRoom(ws, playerId) {
     if (other.ws.readyState === WebSocket.OPEN) {
       other.ws.send(JSON.stringify({
         type: 'player-left',
-        playerId: playerId
+        playerId: player.id
       }));
     }
   });
