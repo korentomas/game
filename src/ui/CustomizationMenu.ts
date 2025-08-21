@@ -23,24 +23,30 @@ export class CustomizationMenu {
   
   private setupKeyboardControls() {
     document.addEventListener('keydown', (e) => {
-      // Toggle with C key
+      // If menu is visible, stop all game controls except ESC
+      if (this.isVisible) {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          e.stopPropagation();
+          this.hide();
+          return;
+        }
+        
+        // Block all other game controls when menu is open
+        // This prevents T from opening chat, etc.
+        if (!this.isInputFocused() || e.key !== 'Tab') {
+          e.stopPropagation();
+        }
+        return;
+      }
+      
+      // Toggle with C key only when menu is closed
       if (e.key === 'c' && !this.isInputFocused()) {
         e.preventDefault();
         this.toggle();
         return;
       }
-      
-      // Only process if menu is visible and terminal input is focused
-      if (!this.isVisible || !this.terminalInput) return;
-      
-      // Let terminal input handle its own events when focused
-      if (document.activeElement === this.terminalInput) {
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          this.hide();
-        }
-      }
-    });
+    }, true); // Use capture phase to intercept before other handlers
   }
   
   private isInputFocused(): boolean {
@@ -330,17 +336,23 @@ export class CustomizationMenu {
     // Terminal input
     if (this.terminalInput) {
       this.terminalInput.addEventListener('keydown', (e) => {
+        // Stop propagation to prevent game controls from triggering
+        e.stopPropagation();
+        
         if (e.key === 'Enter') {
+          e.preventDefault();
           const command = this.terminalInput!.value;
           this.terminalInput!.value = '';
           this.processCommand(command);
         } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
           // Command history navigation
           if (this.historyIndex > 0) {
             this.historyIndex--;
             this.terminalInput!.value = this.commandHistory[this.historyIndex];
           }
         } else if (e.key === 'ArrowDown') {
+          e.preventDefault();
           // Command history navigation
           if (this.historyIndex < this.commandHistory.length - 1) {
             this.historyIndex++;
@@ -350,6 +362,16 @@ export class CustomizationMenu {
             this.terminalInput!.value = '';
           }
         }
+      });
+      
+      // Also stop keyup events from propagating
+      this.terminalInput.addEventListener('keyup', (e) => {
+        e.stopPropagation();
+      });
+      
+      // And keypress events
+      this.terminalInput.addEventListener('keypress', (e) => {
+        e.stopPropagation();
       });
     }
   }
