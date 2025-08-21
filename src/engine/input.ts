@@ -63,4 +63,12 @@ export class Input {
     this.mouseDeltaY = 0;
     return { dx, dy };
   }
+  
+  clearAllKeys() {
+    // Clear all pressed keys - useful when opening menus
+    this.keys.clear();
+    this.mouseButtons.clear();
+    this.mouseDeltaX = 0;
+    this.mouseDeltaY = 0;
+  }
 }

@@ -1,6 +1,8 @@
 import { ShipCustomization, ShipCustomizer } from '../entities/ShipCustomization';
 import { Ship } from '../entities/Ship';
 
+import { Input } from '../engine/input';
+
 export class CustomizationMenu {
   private container: HTMLDivElement;
   private isVisible = false;
@@ -11,6 +13,7 @@ export class CustomizationMenu {
   private currentPath: string[] = [];
   private commandHistory: string[] = [];
   private historyIndex = -1;
+  private inputSystem: Input | null = null;
   
   constructor() {
     this.currentCustomization = ShipCustomizer.getClassic();
@@ -398,6 +401,11 @@ export class CustomizationMenu {
     this.isVisible = true;
     this.container.style.display = 'block';
     
+    // Clear all input keys to stop ship movement
+    if (this.inputSystem) {
+      this.inputSystem.clearAllKeys();
+    }
+    
     // Load current customization
     const saved = ShipCustomizer.loadFromLocalStorage('local');
     if (saved) {
@@ -431,5 +439,9 @@ export class CustomizationMenu {
   
   setOnCustomizationChange(callback: (customization: ShipCustomization) => void) {
     this.onCustomizationChange = callback;
+  }
+  
+  setInputSystem(input: Input) {
+    this.inputSystem = input;
   }
 }

@@ -62,6 +62,7 @@ export function bootstrap() {
   
   // Create customization menu
   const customizationMenu = new CustomizationMenu();
+  customizationMenu.setInputSystem(input); // Pass input system to clear keys when opening
   customizationMenu.setOnCustomizationChange((newCustomization) => {
     ship.applyCustomization(newCustomization);
     // Also update network manager if connected
