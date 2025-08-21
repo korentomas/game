@@ -511,6 +511,7 @@ export class NetworkManager {
     
     // Fallback to WebSocket if no data channels are open
     if (!sentViaDataChannel && this.ws?.readyState === WebSocket.OPEN) {
+      // console.log('Sending position via WebSocket fallback');
       this.ws.send(JSON.stringify({
         type: 'position-update',
         position: { x: position.x, y: position.y, z: position.z },
@@ -575,6 +576,7 @@ export class NetworkManager {
   private updateRemotePlayer(id: string, position: any, rotation: number, velocity?: any, isThrusting?: boolean) {
     const player = this.remotePlayers.get(id);
     if (!player) {
+      console.log('Player not found for update:', id, 'Available players:', Array.from(this.remotePlayers.keys()));
       // Player doesn't exist yet, add them
       this.addRemotePlayer(id, position, rotation);
       return;
