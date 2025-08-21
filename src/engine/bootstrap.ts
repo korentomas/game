@@ -85,9 +85,10 @@ export async function bootstrap() {
   // Load or generate ship customization
   const playerId = userSession.userId;
   const savedCustomization = ShipCustomizer.loadFromLocalStorage(playerId);
+  // Don't use a default here - let the server provide the saved one or use default there
   const shipCustomization = savedCustomization || ShipCustomizer.getClassic(); // Use classic look by default
   
-  // Save if it was generated
+  // Save if it was generated (this will be overridden by server if user has saved customization)
   if (!savedCustomization) {
     ShipCustomizer.saveToLocalStorage(playerId, shipCustomization);
   }
@@ -100,9 +101,11 @@ export async function bootstrap() {
   customizationMenu.setInputSystem(input); // Pass input system to clear keys when opening
   customizationMenu.setOnCustomizationChange((newCustomization) => {
     ship.applyCustomization(newCustomization);
+    // Save to localStorage with correct userId
+    ShipCustomizer.saveToLocalStorage(playerId, newCustomization);
     // Also update network manager if connected
     networkManager.localCustomization = newCustomization;
-    // Send customization update to other players
+    // Send customization update to other players and server
     networkManager.sendCustomizationUpdate(newCustomization);
   });
 
@@ -160,6 +163,12 @@ export async function bootstrap() {
   
   // Set up network callbacks
   networkManager.setCallbacks({
+    onCustomizationLoaded: (customization) => {
+      // Server sent us our saved customization
+      console.log('Applying saved customization from server');
+      ship.applyCustomization(customization);
+      ShipCustomizer.saveToLocalStorage(playerId, customization);
+    },
     onPlayerJoined: (player) => {
       scene.add(player.group);
       // Add particle system to scene

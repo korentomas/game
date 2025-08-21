@@ -47,9 +47,9 @@ wss.on('connection', (ws) => {
         
         case 'join-room': {
           const roomId = data.roomId || 'default';
-          const customization = data.customization || null;
+          let customization = data.customization || null;
           
-          // If a token is provided, validate it and get the username
+          // If a token is provided, validate it and get the username and saved customization
           if (data.token) {
             const session = sessions.get(data.token);
             if (session) {
@@ -58,6 +58,13 @@ wss.on('connection', (ws) => {
               ws.userId = session.userId;
               ws.playerId = session.userId; // Use userId as playerId so refreshes keep same ID
               playerId = session.userId; // Update local variable too
+              
+              // Load user's saved customization
+              const user = users.get(session.userId);
+              if (user && user.customization) {
+                customization = user.customization;
+                console.log(`Loaded saved customization for ${ws.username}`);
+              }
             }
           }
           
@@ -250,6 +257,40 @@ wss.on('connection', (ws) => {
           break;
         }
         
+        case 'customization-update': {
+          // Handle customization update from authenticated user
+          const roomId = playerRooms.get(ws);
+          if (roomId && ws.userId) {
+            const room = rooms.get(roomId);
+            if (room) {
+              // Update user's stored customization
+              const user = users.get(ws.userId);
+              if (user) {
+                user.customization = data.customization;
+                console.log(`Updated customization for user ${ws.username}`);
+              }
+              
+              // Update player in room
+              const player = Array.from(room).find(p => p.ws === ws);
+              if (player) {
+                player.customization = data.customization;
+                
+                // Broadcast to all other players in room
+                room.forEach(other => {
+                  if (other.ws !== ws && other.ws.readyState === WebSocket.OPEN) {
+                    other.ws.send(JSON.stringify({
+                      type: 'player-customization-update',
+                      playerId: ws.playerId,
+                      customization: data.customization
+                    }));
+                  }
+                });
+              }
+            }
+          }
+          break;
+        }
+        
         case 'position-update': {
           // Fallback position sync (before WebRTC is established)
           const roomId = playerRooms.get(ws);
@@ -321,12 +362,19 @@ function joinRoom(ws, playerId, roomId, customization = null) {
   room.add(player);
   playerRooms.set(ws, roomId);
   
-  // Notify player of room join with their actual player ID
-  ws.send(JSON.stringify({
+  // Notify player of room join with their actual player ID and customization
+  const joinMessage = {
     type: 'room-joined',
     roomId: roomId,
     playerId: player.id  // Send the actual player ID being used
-  }));
+  };
+  
+  // Include customization if they have one saved
+  if (player.customization) {
+    joinMessage.customization = player.customization;
+  }
+  
+  ws.send(JSON.stringify(joinMessage));
   
   // Notify player of existing players
   const otherPlayers = Array.from(room)
@@ -428,7 +476,7 @@ function handleLogin(ws, username) {
     userId: userId,
     username: username,
     createdAt: Date.now(),
-    customization: null
+    customization: null // Will store ship customization here
   };
   
   users.set(userId, userData);

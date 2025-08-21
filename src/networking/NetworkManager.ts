@@ -67,6 +67,7 @@ export class NetworkManager {
   // Junk spawn callback removed - deterministic generation
   private onJunkDestroy?: (junkId: string, destroyerId: string) => void;
   private onJunkHit?: (junkId: string, damage: number, hitterId: string) => void;
+  private onCustomizationLoaded?: (customization: any) => void;
   
   constructor() {}
   
@@ -124,6 +125,15 @@ export class NetworkManager {
           this.localPlayerId = message.playerId;
           console.log('Updated player ID to:', this.localPlayerId);
         }
+        // If server sent customization, it means we have a saved one
+        if (message.customization) {
+          this.localCustomization = message.customization;
+          console.log('Received saved customization from server');
+          // Notify bootstrap to apply it
+          if (this.onCustomizationLoaded) {
+            this.onCustomizationLoaded(message.customization);
+          }
+        }
         break;
         
       case 'existing-players':
@@ -167,6 +177,17 @@ export class NetworkManager {
         
       case 'ice-candidate':
         await this.handleICECandidate(message.data, message.from);
+        break;
+        
+      case 'player-customization-update':
+        // Handle customization update from another player
+        console.log('Received customization update for player:', message.playerId);
+        const playerToUpdate = this.remotePlayers.get(message.playerId);
+        if (playerToUpdate && playerToUpdate.ship) {
+          playerToUpdate.ship.applyCustomization(message.customization);
+          playerToUpdate.customization = message.customization;
+          console.log('Applied customization to remote player:', message.playerId);
+        }
         break;
         
       case 'chat-message':
@@ -838,6 +859,7 @@ export class NetworkManager {
     // onJunkSpawn removed - deterministic generation
     onJunkDestroy?: (junkId: string, destroyerId: string) => void;
     onJunkHit?: (junkId: string, damage: number, hitterId: string) => void;
+    onCustomizationLoaded?: (customization: any) => void;
   }) {
     this.onPlayerJoined = callbacks.onPlayerJoined;
     this.onPlayerLeft = callbacks.onPlayerLeft;
@@ -850,6 +872,7 @@ export class NetworkManager {
     // onJunkSpawn removed - deterministic generation
     this.onJunkDestroy = callbacks.onJunkDestroy;
     this.onJunkHit = callbacks.onJunkHit;
+    this.onCustomizationLoaded = callbacks.onCustomizationLoaded;
   }
   
   disconnect() {
