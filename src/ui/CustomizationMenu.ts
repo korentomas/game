@@ -6,15 +6,11 @@ export class CustomizationMenu {
   private isVisible = false;
   private onCustomizationChange?: (customization: ShipCustomization) => void;
   private currentCustomization: ShipCustomization;
-  private selectedCategory = 0;
-  private selectedOption = 0;
-  private categories = ['model', 'hull', 'engine', 'decal'];
-  private categoryOptions: Record<string, string[]> = {
-    model: ['fighter', 'cruiser', 'speeder'],
-    hull: ['#4fc3f7', '#ff4444', '#44ff44', '#ffff44', '#ff44ff', '#44ffff', '#ff8800', '#8844ff'],
-    engine: ['#00e5ff', '#ff00ff', '#00ff00', '#ffff00', '#ff8800', '#ff0000', '#0088ff', '#ffffff'],
-    decal: ['none', 'stripes', 'flames', 'stars']
-  };
+  private terminalInput: HTMLInputElement | null = null;
+  private terminalOutput: HTMLDivElement | null = null;
+  private currentPath: string[] = [];
+  private commandHistory: string[] = [];
+  private historyIndex = -1;
   
   constructor() {
     this.currentCustomization = ShipCustomizer.getClassic();
@@ -34,43 +30,15 @@ export class CustomizationMenu {
         return;
       }
       
-      // Only process navigation if menu is visible
-      if (!this.isVisible) return;
+      // Only process if menu is visible and terminal input is focused
+      if (!this.isVisible || !this.terminalInput) return;
       
-      switch(e.key) {
-        case 'ArrowUp':
-        case 'w':
-          e.preventDefault();
-          this.navigateCategory(-1);
-          break;
-        case 'ArrowDown':
-        case 's':
-          e.preventDefault();
-          this.navigateCategory(1);
-          break;
-        case 'ArrowLeft':
-        case 'a':
-          e.preventDefault();
-          this.navigateOption(-1);
-          break;
-        case 'ArrowRight':
-        case 'd':
-          e.preventDefault();
-          this.navigateOption(1);
-          break;
-        case 'Enter':
-        case ' ':
-          e.preventDefault();
-          this.selectCurrentOption();
-          break;
-        case 'r':
-          e.preventDefault();
-          this.randomize();
-          break;
-        case 'Escape':
+      // Let terminal input handle its own events when focused
+      if (document.activeElement === this.terminalInput) {
+        if (e.key === 'Escape') {
           e.preventDefault();
           this.hide();
-          break;
+        }
       }
     });
   }
@@ -80,82 +48,218 @@ export class CustomizationMenu {
     return activeElement?.tagName === 'INPUT' || activeElement?.tagName === 'TEXTAREA';
   }
   
-  private navigateCategory(direction: number) {
-    this.selectedCategory = (this.selectedCategory + direction + this.categories.length) % this.categories.length;
-    this.selectedOption = 0; // Reset option selection when changing category
-    this.updateVisualSelection();
-  }
-  
-  private navigateOption(direction: number) {
-    const category = this.categories[this.selectedCategory];
-    const options = this.categoryOptions[category];
-    this.selectedOption = (this.selectedOption + direction + options.length) % options.length;
-    this.updateVisualSelection();
-  }
-  
-  private selectCurrentOption() {
-    const category = this.categories[this.selectedCategory];
-    const options = this.categoryOptions[category];
-    const selectedValue = options[this.selectedOption];
+  private processCommand(command: string) {
+    if (!this.terminalOutput) return;
     
-    switch(category) {
+    // Add command to history
+    this.commandHistory.push(command);
+    this.historyIndex = this.commandHistory.length;
+    
+    // Echo command
+    this.addLine(`> ${command}`, '#00e5ff');
+    
+    const parts = command.toLowerCase().trim().split(' ');
+    const cmd = parts[0];
+    const args = parts.slice(1);
+    
+    switch(cmd) {
+      case 'help':
+      case '?':
+        this.showHelp();
+        break;
+      case 'ls':
+      case 'list':
+        this.listOptions();
+        break;
+      case 'set':
+        if (args.length >= 2) {
+          this.setOption(args[0], args.slice(1).join(' '));
+        } else {
+          this.addLine('Usage: set <property> <value>', '#ff4444');
+        }
+        break;
+      case 'show':
+        this.showCurrentConfig();
+        break;
+      case 'random':
+        this.randomizeConfig();
+        break;
+      case 'classic':
+        this.setClassicConfig();
+        break;
+      case 'apply':
+        this.applyCustomization();
+        break;
+      case 'exit':
+      case 'quit':
+        this.hide();
+        break;
+      case 'clear':
+      case 'cls':
+        if (this.terminalOutput) {
+          this.terminalOutput.innerHTML = '';
+          this.showWelcome();
+        }
+        break;
+      default:
+        if (cmd) {
+          this.addLine(`Unknown command: ${cmd}. Type 'help' for commands.`, '#ff4444');
+        }
+        break;
+    }
+  }
+  
+  private showHelp() {
+    this.addLine('╔════════════════════════════════════════════╗', '#00e5ff');
+    this.addLine('║         SHIP CUSTOMIZATION TERMINAL        ║', '#00e5ff');
+    this.addLine('╚════════════════════════════════════════════╝', '#00e5ff');
+    this.addLine('');
+    this.addLine('COMMANDS:', '#ffff44');
+    this.addLine('  help      - Show this help', '#ffffff');
+    this.addLine('  ls        - List available options', '#ffffff');
+    this.addLine('  show      - Show current configuration', '#ffffff');
+    this.addLine('  set       - Set a property (see below)', '#ffffff');
+    this.addLine('  random    - Generate random configuration', '#ffffff');
+    this.addLine('  classic   - Reset to classic ship', '#ffffff');
+    this.addLine('  apply     - Apply changes and exit', '#ffffff');
+    this.addLine('  clear     - Clear terminal', '#ffffff');
+    this.addLine('  exit      - Exit without saving', '#ffffff');
+    this.addLine('');
+    this.addLine('SET COMMANDS:', '#ffff44');
+    this.addLine('  set model [fighter|cruiser|speeder]', '#ffffff');
+    this.addLine('  set hull [1-8]    - Choose hull color', '#ffffff');
+    this.addLine('  set engine [1-8]  - Choose engine glow', '#ffffff');
+    this.addLine('  set decal [none|stripes|flames|stars]', '#ffffff');
+  }
+  
+  private listOptions() {
+    this.addLine('AVAILABLE OPTIONS:', '#ffff44');
+    this.addLine('');
+    this.addLine('Models:', '#00e5ff');
+    this.addLine('  1. fighter  - Balanced all-rounder', '#ffffff');
+    this.addLine('  2. cruiser  - Heavy and tanky', '#ffffff');
+    this.addLine('  3. speeder  - Fast and agile', '#ffffff');
+    this.addLine('');
+    this.addLine('Hull Colors:', '#00e5ff');
+    this.addLine('  1. Classic Blue  (#4fc3f7)', '#4fc3f7');
+    this.addLine('  2. Red          (#ff4444)', '#ff4444');
+    this.addLine('  3. Green        (#44ff44)', '#44ff44');
+    this.addLine('  4. Yellow       (#ffff44)', '#ffff44');
+    this.addLine('  5. Magenta      (#ff44ff)', '#ff44ff');
+    this.addLine('  6. Cyan         (#44ffff)', '#44ffff');
+    this.addLine('  7. Orange       (#ff8800)', '#ff8800');
+    this.addLine('  8. Purple       (#8844ff)', '#8844ff');
+    this.addLine('');
+    this.addLine('Engine Colors:', '#00e5ff');
+    this.addLine('  1. Cyan         (#00e5ff)', '#00e5ff');
+    this.addLine('  2. Magenta      (#ff00ff)', '#ff00ff');
+    this.addLine('  3. Green        (#00ff00)', '#00ff00');
+    this.addLine('  4. Yellow       (#ffff00)', '#ffff00');
+    this.addLine('  5. Orange       (#ff8800)', '#ff8800');
+    this.addLine('  6. Red          (#ff0000)', '#ff0000');
+    this.addLine('  7. Blue         (#0088ff)', '#0088ff');
+    this.addLine('  8. White        (#ffffff)', '#ffffff');
+  }
+  
+  private setOption(property: string, value: string) {
+    const hullColors = ['#4fc3f7', '#ff4444', '#44ff44', '#ffff44', '#ff44ff', '#44ffff', '#ff8800', '#8844ff'];
+    const engineColors = ['#00e5ff', '#ff00ff', '#00ff00', '#ffff00', '#ff8800', '#ff0000', '#0088ff', '#ffffff'];
+    
+    switch(property) {
       case 'model':
-        this.currentCustomization.modelType = selectedValue as 'fighter' | 'cruiser' | 'speeder';
-        this.updateModelButtons(this.container);
+        if (['fighter', 'cruiser', 'speeder'].includes(value)) {
+          this.currentCustomization.modelType = value as 'fighter' | 'cruiser' | 'speeder';
+          this.addLine(`Model set to: ${value}`, '#44ff44');
+          this.updatePreview();
+        } else {
+          this.addLine('Invalid model. Use: fighter, cruiser, or speeder', '#ff4444');
+        }
         break;
       case 'hull':
-        this.currentCustomization.colors.primary = selectedValue;
-        this.updateColorButtons(this.container);
+        const hullIndex = parseInt(value) - 1;
+        if (hullIndex >= 0 && hullIndex < hullColors.length) {
+          this.currentCustomization.colors.primary = hullColors[hullIndex];
+          this.addLine(`Hull color set to: ${hullColors[hullIndex]}`, '#44ff44');
+          this.updatePreview();
+        } else {
+          this.addLine('Invalid hull color. Use numbers 1-8', '#ff4444');
+        }
         break;
       case 'engine':
-        this.currentCustomization.colors.engine = selectedValue;
-        this.currentCustomization.colors.trail = selectedValue;
-        this.updateColorButtons(this.container);
+        const engineIndex = parseInt(value) - 1;
+        if (engineIndex >= 0 && engineIndex < engineColors.length) {
+          this.currentCustomization.colors.engine = engineColors[engineIndex];
+          this.currentCustomization.colors.trail = engineColors[engineIndex];
+          this.addLine(`Engine glow set to: ${engineColors[engineIndex]}`, '#44ff44');
+          this.updatePreview();
+        } else {
+          this.addLine('Invalid engine color. Use numbers 1-8', '#ff4444');
+        }
         break;
       case 'decal':
-        this.currentCustomization.decalType = selectedValue as 'none' | 'stripes' | 'flames' | 'stars';
-        this.updateDecalButtons(this.container);
+        if (['none', 'stripes', 'flames', 'stars'].includes(value)) {
+          this.currentCustomization.decalType = value as 'none' | 'stripes' | 'flames' | 'stars';
+          this.addLine(`Decal set to: ${value}`, '#44ff44');
+          this.updatePreview();
+        } else {
+          this.addLine('Invalid decal. Use: none, stripes, flames, or stars', '#ff4444');
+        }
+        break;
+      default:
+        this.addLine(`Unknown property: ${property}`, '#ff4444');
         break;
     }
   }
   
-  private randomize() {
-    this.currentCustomization = ShipCustomizer.generateRandomCustomization();
-    this.updateAllButtons(this.container);
+  private showCurrentConfig() {
+    this.addLine('CURRENT CONFIGURATION:', '#ffff44');
+    this.addLine(`  Model:  ${this.currentCustomization.modelType}`, '#ffffff');
+    this.addLine(`  Hull:   ${this.currentCustomization.colors.primary}`, this.currentCustomization.colors.primary);
+    this.addLine(`  Engine: ${this.currentCustomization.colors.engine}`, this.currentCustomization.colors.engine);
+    this.addLine(`  Decal:  ${this.currentCustomization.decalType}`, '#ffffff');
   }
   
-  private updateVisualSelection() {
-    // Remove all selection highlights
-    this.container.querySelectorAll('.category-row').forEach((row, idx) => {
-      if (idx === this.selectedCategory) {
-        (row as HTMLElement).style.outline = '2px solid #00e5ff';
-        (row as HTMLElement).style.outlineOffset = '2px';
-      } else {
-        (row as HTMLElement).style.outline = 'none';
-      }
-    });
+  private randomizeConfig() {
+    this.currentCustomization = ShipCustomizer.generateRandomCustomization();
+    this.addLine('Configuration randomized!', '#44ff44');
+    this.showCurrentConfig();
+    this.updatePreview();
+  }
+  
+  private setClassicConfig() {
+    this.currentCustomization = ShipCustomizer.getClassic();
+    this.addLine('Classic configuration restored!', '#44ff44');
+    this.showCurrentConfig();
+    this.updatePreview();
+  }
+  
+  private addLine(text: string, color: string = '#ffffff') {
+    if (!this.terminalOutput) return;
     
-    // Highlight selected option within category
-    const category = this.categories[this.selectedCategory];
-    const categorySelectors: Record<string, string> = {
-      'model': '.model-btn',
-      'hull': '.color-btn[data-type="primary"]',
-      'engine': '.color-btn[data-type="engine"]',
-      'decal': '.decal-btn'
-    };
+    const line = document.createElement('div');
+    line.style.color = color;
+    line.style.fontFamily = "'Courier New', monospace";
+    line.style.fontSize = '12px';
+    line.style.lineHeight = '1.4';
+    line.textContent = text;
+    this.terminalOutput.appendChild(line);
     
-    const selector = categorySelectors[category];
-    if (selector) {
-      this.container.querySelectorAll(selector).forEach((btn, idx) => {
-        if (idx === this.selectedOption) {
-          (btn as HTMLElement).style.boxShadow = '0 0 10px #00e5ff, inset 0 0 5px #00e5ff';
-          (btn as HTMLElement).style.transform = 'scale(1.1)';
-        } else {
-          (btn as HTMLElement).style.boxShadow = 'none';
-          (btn as HTMLElement).style.transform = 'scale(1)';
-        }
-      });
-    }
+    // Auto-scroll to bottom
+    this.terminalOutput.scrollTop = this.terminalOutput.scrollHeight;
+  }
+  
+  private showWelcome() {
+    this.addLine('═══════════════════════════════════════════', '#00e5ff');
+    this.addLine('    SHIP CUSTOMIZATION TERMINAL v1.0', '#00e5ff');
+    this.addLine('═══════════════════════════════════════════', '#00e5ff');
+    this.addLine('');
+    this.addLine('Type "help" for commands or "ls" to see options', '#ffff44');
+    this.addLine('');
+  }
+  
+  private updatePreview() {
+    // Update the visual preview if we add one later
+    // For now, just update the internal state
   }
   
   private createMenu(): HTMLDivElement {
@@ -165,79 +269,45 @@ export class CustomizationMenu {
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
-      background: rgba(0, 0, 0, 0.9);
+      background: #000000;
       border: 2px solid #00e5ff;
-      border-radius: 8px;
-      padding: 20px;
+      border-radius: 4px;
+      padding: 0;
       color: white;
-      font-family: 'Press Start 2P', monospace;
-      font-size: 10px;
+      font-family: 'Courier New', monospace;
+      font-size: 12px;
       display: none;
       z-index: 10000;
-      min-width: 400px;
+      width: 600px;
+      height: 400px;
+      box-shadow: 0 0 20px #00e5ff;
     `;
     
     container.innerHTML = `
-      <h2 style="margin: 0 0 20px 0; color: #00e5ff; font-size: 14px; text-align: center;">
-        SHIP CUSTOMIZATION
-      </h2>
-      
-      <div style="margin-bottom: 15px; padding: 10px; background: rgba(0, 232, 255, 0.1); border-radius: 4px; text-align: center;">
-        <div style="color: #00e5ff; font-size: 9px; margin-bottom: 5px;">KEYBOARD CONTROLS</div>
-        <div style="color: white; font-size: 8px; line-height: 1.4;">
-          ↑↓/WS: Select Category | ←→/AD: Choose Option<br>
-          SPACE/ENTER: Apply Selection | R: Random | ESC: Close
+      <div style="background: #00e5ff; color: black; padding: 5px 10px; font-weight: bold; display: flex; justify-content: space-between; align-items: center;">
+        <span>SHIP CUSTOMIZATION TERMINAL</span>
+        <span style="cursor: pointer; padding: 0 5px;" id="close-x">✕</span>
+      </div>
+      <div id="terminal-output" style="
+        height: 320px;
+        padding: 10px;
+        overflow-y: auto;
+        background: #000000;
+        color: #ffffff;
+      "></div>
+      <div style="padding: 10px; background: #111111; border-top: 1px solid #333;">
+        <div style="display: flex; align-items: center;">
+          <span style="color: #00e5ff; margin-right: 8px;">$</span>
+          <input id="terminal-input" type="text" style="
+            flex: 1;
+            background: transparent;
+            border: none;
+            color: #ffffff;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            outline: none;
+          " placeholder="Type 'help' for commands" />
         </div>
-      </div>
-      
-      <div class="category-row" style="margin-bottom: 20px; padding: 5px; border-radius: 4px;">
-        <label style="display: block; margin-bottom: 10px; color: #00e5ff;">Ship Model:</label>
-        <div style="display: flex; gap: 10px;">
-          <button class="model-btn" data-model="fighter" style="${this.getButtonStyle(true)}">Fighter</button>
-          <button class="model-btn" data-model="cruiser" style="${this.getButtonStyle()}">Cruiser</button>
-          <button class="model-btn" data-model="speeder" style="${this.getButtonStyle()}">Speeder</button>
-        </div>
-      </div>
-      
-      <div class="category-row" style="margin-bottom: 20px; padding: 5px; border-radius: 4px;">
-        <label style="display: block; margin-bottom: 10px; color: #00e5ff;">Hull Color:</label>
-        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-          ${this.createColorButtons('primary', [
-            '#4fc3f7', '#ff4444', '#44ff44', '#ffff44', 
-            '#ff44ff', '#44ffff', '#ff8800', '#8844ff'
-          ])}
-        </div>
-      </div>
-      
-      <div class="category-row" style="margin-bottom: 20px; padding: 5px; border-radius: 4px;">
-        <label style="display: block; margin-bottom: 10px; color: #00e5ff;">Engine Glow:</label>
-        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-          ${this.createColorButtons('engine', [
-            '#00e5ff', '#ff00ff', '#00ff00', '#ffff00', 
-            '#ff8800', '#ff0000', '#0088ff', '#ffffff'
-          ])}
-        </div>
-      </div>
-      
-      <div class="category-row" style="margin-bottom: 20px; padding: 5px; border-radius: 4px;">
-        <label style="display: block; margin-bottom: 10px; color: #00e5ff;">Decal:</label>
-        <div style="display: flex; gap: 10px;">
-          <button class="decal-btn" data-decal="none" style="${this.getButtonStyle(true)}">None</button>
-          <button class="decal-btn" data-decal="stripes" style="${this.getButtonStyle()}">Stripes</button>
-          <button class="decal-btn" data-decal="flames" style="${this.getButtonStyle()}">Flames</button>
-          <button class="decal-btn" data-decal="stars" style="${this.getButtonStyle()}">Stars</button>
-        </div>
-      </div>
-      
-      <div style="display: flex; gap: 10px; margin-top: 30px;">
-        <button id="apply-btn" style="${this.getButtonStyle(false, true)}">Apply (Enter)</button>
-        <button id="random-btn" style="${this.getButtonStyle()}">Random (R)</button>
-        <button id="classic-btn" style="${this.getButtonStyle()}">Classic</button>
-        <button id="close-btn" style="${this.getButtonStyle()}">Close (ESC)</button>
-      </div>
-      
-      <div style="margin-top: 15px; text-align: center; color: #888; font-size: 8px;">
-        Press C to toggle this menu
       </div>
     `;
     
@@ -247,127 +317,41 @@ export class CustomizationMenu {
     return container;
   }
   
-  private getButtonStyle(active = false, primary = false): string {
-    const baseStyle = `
-      padding: 8px 12px;
-      background: ${primary ? '#00e5ff' : active ? '#00e5ff' : 'rgba(0, 232, 255, 0.1)'};
-      color: ${primary || active ? 'black' : 'white'};
-      border: 1px solid #00e5ff;
-      border-radius: 4px;
-      font-family: 'Press Start 2P', monospace;
-      font-size: 8px;
-      cursor: pointer;
-      transition: all 0.2s;
-    `;
-    return baseStyle;
-  }
-  
-  private createColorButtons(type: 'primary' | 'engine', colors: string[]): string {
-    return colors.map(color => `
-      <button 
-        class="color-btn" 
-        data-type="${type}" 
-        data-color="${color}"
-        style="
-          width: 30px;
-          height: 30px;
-          background: ${color};
-          border: 2px solid ${color === this.currentCustomization.colors[type] ? 'white' : 'transparent'};
-          border-radius: 4px;
-          cursor: pointer;
-          transition: all 0.2s;
-        "
-      ></button>
-    `).join('');
-  }
-  
   private attachEventListeners(container: HTMLDivElement) {
-    // Model selection
-    container.querySelectorAll('.model-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const model = (e.target as HTMLElement).dataset.model as 'fighter' | 'cruiser' | 'speeder';
-        this.currentCustomization.modelType = model;
-        this.updateModelButtons(container);
-      });
-    });
+    // Get terminal elements
+    this.terminalInput = container.querySelector('#terminal-input') as HTMLInputElement;
+    this.terminalOutput = container.querySelector('#terminal-output') as HTMLDivElement;
     
-    // Color selection
-    container.querySelectorAll('.color-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const target = e.target as HTMLElement;
-        const type = target.dataset.type as 'primary' | 'engine';
-        const color = target.dataset.color!;
-        
-        if (type === 'primary') {
-          this.currentCustomization.colors.primary = color;
-        } else if (type === 'engine') {
-          this.currentCustomization.colors.engine = color;
-          this.currentCustomization.colors.trail = color; // Match trail to engine
-        }
-        
-        this.updateColorButtons(container);
-      });
-    });
-    
-    // Decal selection
-    container.querySelectorAll('.decal-btn').forEach(btn => {
-      btn.addEventListener('click', (e) => {
-        const decal = (e.target as HTMLElement).dataset.decal as 'none' | 'stripes' | 'flames' | 'stars';
-        this.currentCustomization.decalType = decal;
-        this.updateDecalButtons(container);
-      });
-    });
-    
-    // Action buttons
-    container.querySelector('#apply-btn')?.addEventListener('click', () => {
-      this.applyCustomization();
-    });
-    
-    container.querySelector('#random-btn')?.addEventListener('click', () => {
-      this.currentCustomization = ShipCustomizer.generateRandomCustomization();
-      this.updateAllButtons(container);
-    });
-    
-    container.querySelector('#classic-btn')?.addEventListener('click', () => {
-      this.currentCustomization = ShipCustomizer.getClassic();
-      this.updateAllButtons(container);
-    });
-    
-    container.querySelector('#close-btn')?.addEventListener('click', () => {
+    // Close button
+    container.querySelector('#close-x')?.addEventListener('click', () => {
       this.hide();
     });
-  }
-  
-  private updateModelButtons(container: HTMLDivElement) {
-    container.querySelectorAll('.model-btn').forEach(btn => {
-      const isActive = (btn as HTMLElement).dataset.model === this.currentCustomization.modelType;
-      (btn as HTMLElement).style.background = isActive ? '#00e5ff' : 'rgba(0, 232, 255, 0.1)';
-      (btn as HTMLElement).style.color = isActive ? 'black' : 'white';
-    });
-  }
-  
-  private updateColorButtons(container: HTMLDivElement) {
-    container.querySelectorAll('.color-btn').forEach(btn => {
-      const element = btn as HTMLElement;
-      const type = element.dataset.type as 'primary' | 'engine';
-      const color = element.dataset.color!;
-      const isActive = this.currentCustomization.colors[type] === color;
-      element.style.border = `2px solid ${isActive ? 'white' : 'transparent'}`;
-    });
-  }
-  
-  private updateDecalButtons(container: HTMLDivElement) {
-    container.querySelectorAll('.decal-btn').forEach(btn => {
-      const isActive = (btn as HTMLElement).dataset.decal === this.currentCustomization.decalType;
-      (btn as HTMLElement).style.background = isActive ? '#00e5ff' : 'rgba(0, 232, 255, 0.1)';
-      (btn as HTMLElement).style.color = isActive ? 'black' : 'white';
-    });
-  }
-  
-  private updateAllButtons(container: HTMLDivElement) {
-    this.updateModelButtons(container);
-    this.updateColorButtons(container);
-    this.updateDecalButtons(container);
+    
+    // Terminal input
+    if (this.terminalInput) {
+      this.terminalInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          const command = this.terminalInput!.value;
+          this.terminalInput!.value = '';
+          this.processCommand(command);
+        } else if (e.key === 'ArrowUp') {
+          // Command history navigation
+          if (this.historyIndex > 0) {
+            this.historyIndex--;
+            this.terminalInput!.value = this.commandHistory[this.historyIndex];
+          }
+        } else if (e.key === 'ArrowDown') {
+          // Command history navigation
+          if (this.historyIndex < this.commandHistory.length - 1) {
+            this.historyIndex++;
+            this.terminalInput!.value = this.commandHistory[this.historyIndex];
+          } else {
+            this.historyIndex = this.commandHistory.length;
+            this.terminalInput!.value = '';
+          }
+        }
+      });
+    }
   }
   
   private applyCustomization() {
@@ -391,13 +375,18 @@ export class CustomizationMenu {
     const saved = ShipCustomizer.loadFromLocalStorage('local');
     if (saved) {
       this.currentCustomization = saved;
-      this.updateAllButtons(this.container);
     }
     
-    // Initialize visual selection
-    this.selectedCategory = 0;
-    this.selectedOption = 0;
-    this.updateVisualSelection();
+    // Show welcome message
+    if (this.terminalOutput) {
+      this.terminalOutput.innerHTML = '';
+      this.showWelcome();
+    }
+    
+    // Focus terminal input
+    if (this.terminalInput) {
+      this.terminalInput.focus();
+    }
   }
   
   hide() {
