@@ -4,6 +4,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { Input } from './input';
 import { Ship } from '../entities/Ship';
+import { ShipCustomizer } from '../entities/ShipCustomization';
 import { CameraRig } from '../camera/CameraRig';
 import { World } from '../world/World';
 import { ParticleSystem } from '../effects/ParticleSystem';
@@ -19,6 +20,7 @@ import { ProjectileManager } from '../combat/ProjectileManager';
 import { MaterialManager } from '../items/MaterialManager';
 import { MaterialType } from '../items/MaterialDrop';
 import { HUD } from '../ui/HUD';
+import { CustomizationMenu } from '../ui/CustomizationMenu';
 
 export function bootstrap() {
   const appEl = document.getElementById('app')!;
@@ -44,8 +46,30 @@ export function bootstrap() {
   const camera = new THREE.PerspectiveCamera(55, baseWidth / baseHeight, 0.1, 2000);
 
   const input = new Input();
-  const ship = new Ship();
+  
+  // Load or generate ship customization
+  const playerId = 'local'; // Will be replaced with actual player ID when we add auth
+  const savedCustomization = ShipCustomizer.loadFromLocalStorage(playerId);
+  const shipCustomization = savedCustomization || ShipCustomizer.getClassic(); // Use classic look by default
+  
+  // Save if it was generated
+  if (!savedCustomization) {
+    ShipCustomizer.saveToLocalStorage(playerId, shipCustomization);
+  }
+  
+  const ship = new Ship(shipCustomization);
   scene.add(ship.group);
+  
+  // Create customization menu
+  const customizationMenu = new CustomizationMenu();
+  customizationMenu.setInputSystem(input); // Pass input system to clear keys when opening
+  customizationMenu.setOnCustomizationChange((newCustomization) => {
+    ship.applyCustomization(newCustomization);
+    // Also update network manager if connected
+    networkManager.localCustomization = newCustomization;
+    // Send customization update to other players
+    networkManager.sendCustomizationUpdate(newCustomization);
+  });
 
   // Use room name as seed - each room has its own persistent world
   const urlParams = new URLSearchParams(location.search);
@@ -217,9 +241,9 @@ export function bootstrap() {
   // Connect to multiplayer (always, since we always have a room now)
   if (room) {
     networkManager.connect().then(() => {
-      networkManager.joinRoom(room);
-      // Show welcome tip in chat
-      chat.addSystemMessage(`Press T to open chat`);
+      networkManager.joinRoom(room, shipCustomization);
+      // Show welcome tips in chat
+      chat.addSystemMessage(`Press T to open chat, C to customize ship`);
       // Set player ID for material manager
       materialManager.setPlayerId(networkManager.localPlayerId);
       // Junk generation is now deterministic - all players generate the same junk locally

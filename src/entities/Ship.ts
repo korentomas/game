@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { Input } from '../engine/input';
 import { World } from '../world/World';
 import { WeaponStats } from '../combat/Projectile';
+import { ShipCustomization, ShipCustomizer } from './ShipCustomization';
 
 // Map boundary configuration
 const MAP_BOUNDS = {
@@ -24,6 +25,7 @@ export class Ship {
   private fireCooldown = 0;
   public isThrusting = false; // Track if player is actively thrusting
   public lights: any; // Light references for dynamic effects
+  public customization: ShipCustomization;
   
   // Targeting system
   private currentTarget: { position: THREE.Vector3, object: any } | null = null;
@@ -40,32 +42,41 @@ export class Ship {
     lifetime: 0.8      // Short lifetime (0.8 seconds)
   };
 
-  constructor() {
+  constructor(customization?: ShipCustomization) {
+    // Load or use provided customization
+    this.customization = customization || ShipCustomizer.getDefault();
+    
+    // Create ship geometry based on model type
+    const geometry = ShipCustomizer.createShipGeometry(this.customization.modelType);
+    
     const body = new THREE.Mesh(
-      new THREE.BoxGeometry(1, 0.4, 2),
+      geometry,
       new THREE.MeshStandardMaterial({ 
-        color: 0x4fc3f7, 
-        emissive: 0x002244, 
-        emissiveIntensity: 0.3,  // Subtle glow
+        color: new THREE.Color(this.customization.colors.primary),
+        emissive: new THREE.Color(this.customization.colors.primary),
+        emissiveIntensity: 0.2,
         roughness: 0.8, 
-        metalness: 0.1 
+        metalness: 0.3 
       })
     );
+    body.name = 'hull';
     body.position.y = 0.4;
 
     const nose = new THREE.Mesh(
       new THREE.ConeGeometry(0.4, 0.8, 4),
       new THREE.MeshStandardMaterial({ 
-        color: 0x00e5ff, 
-        emissive: 0x001144, 
+        color: new THREE.Color(this.customization.colors.secondary),
+        emissive: new THREE.Color(this.customization.colors.engine),
         emissiveIntensity: 0.4  // Subtle glow
       })
     );
+    nose.name = 'cockpit';
     nose.rotation.x = Math.PI / 2;
     nose.position.set(0, 0.6, 1.1);
 
     // Enhanced engine glow with multiple lights - stronger for better reflection
-    const mainEngineLight = new THREE.PointLight(0x00e5ff, 4.0, 25, 1.0);  // Much stronger and wider range
+    const engineColor = new THREE.Color(this.customization.colors.engine);
+    const mainEngineLight = new THREE.PointLight(engineColor, 4.0, 25, 1.0);  // Much stronger and wider range
     mainEngineLight.position.set(0, 0.5, -0.9);
     mainEngineLight.castShadow = false; // Performance optimization
     
@@ -82,13 +93,14 @@ export class Ship {
     const engineCore = new THREE.Mesh(
       new THREE.SphereGeometry(0.18, 16, 12), 
       new THREE.MeshStandardMaterial({ 
-        color: 0x00e5ff,
-        emissive: 0x00e5ff,
+        color: engineColor,
+        emissive: engineColor,
         emissiveIntensity: 1.2,  // Moderate glow
         transparent: true,
         opacity: 0.9
       })
     );
+    engineCore.name = 'engine';
     engineCore.position.copy(mainEngineLight.position);
     
     // Wing tip lights with moderate glow but strong light emission
@@ -130,6 +142,39 @@ export class Ship {
 
   get position() {
     return this.group.position;
+  }
+  
+  applyCustomization(customization: ShipCustomization) {
+    this.customization = customization;
+    
+    // Apply customization to existing meshes
+    const config = ShipCustomizer.applyCustomization(this.group, customization);
+    
+    // Update ship stats based on model type
+    const modelConfig = {
+      fighter: { thrust: 20, turn: 2.5, hull: 100 },
+      cruiser: { thrust: 16, turn: 1.8, hull: 150 },
+      speeder: { thrust: 28, turn: 3.2, hull: 70 }
+    };
+    
+    const stats = modelConfig[customization.modelType];
+    this.thrustPower = stats.thrust;
+    this.turnRate = stats.turn;
+    this.maxHull = stats.hull;
+    
+    // Update engine light colors
+    if (this.lights) {
+      const engineColor = new THREE.Color(customization.colors.engine);
+      this.lights.mainEngine.color = engineColor;
+      
+      // Update wing lights if they exist
+      if (this.lights.wing1) {
+        this.lights.wing1.color = engineColor;
+        this.lights.wing2.color = engineColor;
+      }
+    }
+    
+    return config;
   }
 
   updateTargeting(junkManager: any) {

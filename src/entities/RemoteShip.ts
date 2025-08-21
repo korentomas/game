@@ -1,40 +1,48 @@
 import * as THREE from 'three';
 import { ParticleSystem } from '../effects/ParticleSystem';
+import { ShipCustomization, ShipCustomizer } from './ShipCustomization';
 
 export class RemoteShip {
   public group: THREE.Group;
   public thrusterSystem: ParticleSystem;
   private lights: any;
+  public customization: ShipCustomization;
   
-  constructor() {
+  constructor(customization?: ShipCustomization) {
     this.group = new THREE.Group();
+    this.customization = customization || ShipCustomizer.getDefault();
     
-    // Create the same ship visual as Ship.ts but red for remote players
+    // Create ship geometry based on customization
+    const geometry = ShipCustomizer.createShipGeometry(this.customization.modelType);
+    
     const body = new THREE.Mesh(
-      new THREE.BoxGeometry(1, 0.4, 2),
+      geometry,
       new THREE.MeshStandardMaterial({ 
-        color: 0xff4444, // Red for remote players
-        emissive: 0x441111, 
-        emissiveIntensity: 0.3,
+        color: new THREE.Color(this.customization.colors.primary),
+        emissive: new THREE.Color(this.customization.colors.primary),
+        emissiveIntensity: 0.2,
         roughness: 0.8, 
-        metalness: 0.1 
+        metalness: 0.3 
       })
     );
+    body.name = 'hull';
     body.position.y = 0.4;
 
     const nose = new THREE.Mesh(
       new THREE.ConeGeometry(0.4, 0.8, 4),
       new THREE.MeshStandardMaterial({ 
-        color: 0xff6666, 
-        emissive: 0x221111, 
+        color: new THREE.Color(this.customization.colors.secondary),
+        emissive: new THREE.Color(this.customization.colors.engine),
         emissiveIntensity: 0.4
       })
     );
+    nose.name = 'cockpit';
     nose.rotation.x = Math.PI / 2;
     nose.position.set(0, 0.6, 1.1);
 
     // Engine lights
-    const mainEngineLight = new THREE.PointLight(0xff6666, 2.0, 15, 1.0);
+    const engineColor = new THREE.Color(this.customization.colors.engine);
+    const mainEngineLight = new THREE.PointLight(engineColor, 2.0, 15, 1.0);
     mainEngineLight.position.set(0, 0.5, -0.9);
     mainEngineLight.castShadow = false;
     
@@ -50,13 +58,14 @@ export class RemoteShip {
     const engineCore = new THREE.Mesh(
       new THREE.SphereGeometry(0.18, 16, 12), 
       new THREE.MeshStandardMaterial({ 
-        color: 0xff6666,
-        emissive: 0xff6666,
+        color: engineColor,
+        emissive: engineColor,
         emissiveIntensity: 1.2,
         transparent: true,
         opacity: 0.9
       })
     );
+    engineCore.name = 'engine';
     engineCore.position.copy(mainEngineLight.position);
     
     // Wing tip lights
@@ -102,6 +111,26 @@ export class RemoteShip {
       additive: true, 
       opacity: 0.9 
     });
+    
+    // Apply model scale
+    const config = ShipCustomizer.applyCustomization(this.group, this.customization);
+  }
+  
+  applyCustomization(customization: ShipCustomization) {
+    this.customization = customization;
+    const config = ShipCustomizer.applyCustomization(this.group, customization);
+    
+    // Update engine light colors
+    if (this.lights) {
+      const engineColor = new THREE.Color(customization.colors.engine);
+      this.lights.mainEngine.color = engineColor;
+      if (this.lights.wing1) {
+        this.lights.wing1.color = engineColor;
+        this.lights.wing2.color = engineColor;
+      }
+    }
+    
+    return config;
   }
   
   updateThruster(isThrusting: boolean, position: THREE.Vector3, heading: number, velocity: THREE.Vector3, dt: number) {

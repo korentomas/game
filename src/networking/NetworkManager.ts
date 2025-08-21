@@ -15,6 +15,7 @@ export interface NetworkPlayer {
   nameTagGroup?: THREE.Group; // Separate group for UI scene
   isThrusting?: boolean;
   heading?: number;
+  customization?: any; // Ship customization data
 }
 
 interface InputCommand {
@@ -43,6 +44,7 @@ export class NetworkManager {
   public roomId: string = 'default';
   public remotePlayers = new Map<string, NetworkPlayer>();
   public isFirstPlayer: boolean = false; // Whether we're the first player in room
+  public localCustomization: any; // Local player's ship customization
   
   // Client-side prediction
   private inputSequence = 0;
@@ -94,12 +96,14 @@ export class NetworkManager {
     });
   }
   
-  joinRoom(roomId: string = 'default') {
+  joinRoom(roomId: string = 'default', customization?: any) {
     this.roomId = roomId;
+    this.localCustomization = customization;
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({
         type: 'join-room',
-        roomId: roomId
+        roomId: roomId,
+        customization: customization
       }));
     }
   }
@@ -127,13 +131,13 @@ export class NetworkManager {
           console.log('Other players already in room - waiting for junk sync');
         }
         for (const playerData of message.players) {
-          this.addRemotePlayer(playerData.id, playerData.position, playerData.rotation);
+          this.addRemotePlayer(playerData.id, playerData.position, playerData.rotation, playerData.customization);
         }
         break;
         
       case 'player-joined':
         // New player joined
-        this.addRemotePlayer(message.playerId, message.position, message.rotation);
+        this.addRemotePlayer(message.playerId, message.position, message.rotation, message.customization);
         // Initiate WebRTC connection as the caller
         await this.initiateWebRTC(message.playerId);
         break;
@@ -218,6 +222,17 @@ export class NetworkManager {
         // Handle junk hit visual effects from other players
         if (this.onJunkHit && message.junkId) {
           this.onJunkHit(message.junkId, message.damage, message.hitterId);
+        }
+        break;
+        
+      case 'customization-update':
+        // Handle customization update from other players
+        if (message.playerId && message.customization) {
+          const player = this.remotePlayers.get(message.playerId);
+          if (player && player.ship) {
+            player.customization = message.customization;
+            player.ship.applyCustomization(message.customization);
+          }
         }
         break;
     }
@@ -503,14 +518,14 @@ export class NetworkManager {
     }
   }
   
-  private addRemotePlayer(id: string, position: any, rotation: number) {
+  private addRemotePlayer(id: string, position: any, rotation: number, customization?: any) {
     if (this.remotePlayers.has(id)) return;
     
     // Generate a fun name for the player (can be replaced with actual names later)
     const name = `Player-${id.substring(0, 4).toUpperCase()}`;
     
-    // Create RemoteShip with particle effects
-    const remoteShip = new RemoteShip();
+    // Create RemoteShip with customization
+    const remoteShip = new RemoteShip(customization);
     
     const player: NetworkPlayer = {
       id,
@@ -520,7 +535,8 @@ export class NetworkManager {
       velocity: new THREE.Vector3(),
       group: remoteShip.group,
       ship: remoteShip,
-      lastUpdate: Date.now()
+      lastUpdate: Date.now(),
+      customization: customization
     };
     
     // Create name tag (will be added to UI scene separately)
@@ -843,6 +859,16 @@ export class NetworkManager {
     
     if (this.ws) {
       this.ws.close();
+    }
+  }
+  
+  sendCustomizationUpdate(customization: any) {
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({
+        type: 'customization-update',
+        customization,
+        playerId: this.localPlayerId
+      }));
     }
   }
 }
