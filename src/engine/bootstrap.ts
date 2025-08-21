@@ -20,6 +20,7 @@ import { ProjectileManager } from '../combat/ProjectileManager';
 import { MaterialManager } from '../items/MaterialManager';
 import { MaterialType } from '../items/MaterialDrop';
 import { HUD } from '../ui/HUD';
+import { CustomizationMenu } from '../ui/CustomizationMenu';
 
 export function bootstrap() {
   const appEl = document.getElementById('app')!;
@@ -58,6 +59,16 @@ export function bootstrap() {
   
   const ship = new Ship(shipCustomization);
   scene.add(ship.group);
+  
+  // Create customization menu
+  const customizationMenu = new CustomizationMenu();
+  customizationMenu.setOnCustomizationChange((newCustomization) => {
+    ship.applyCustomization(newCustomization);
+    // Also update network manager if connected
+    if (networkManager.localCustomization) {
+      networkManager.localCustomization = newCustomization;
+    }
+  });
 
   // Use room name as seed - each room has its own persistent world
   const urlParams = new URLSearchParams(location.search);
@@ -230,8 +241,8 @@ export function bootstrap() {
   if (room) {
     networkManager.connect().then(() => {
       networkManager.joinRoom(room, shipCustomization);
-      // Show welcome tip in chat
-      chat.addSystemMessage(`Press T to open chat`);
+      // Show welcome tips in chat
+      chat.addSystemMessage(`Press T to open chat, C to customize ship`);
       // Set player ID for material manager
       materialManager.setPlayerId(networkManager.localPlayerId);
       // Junk generation is now deterministic - all players generate the same junk locally
