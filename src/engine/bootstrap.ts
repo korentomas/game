@@ -4,6 +4,7 @@ import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { Input } from './input';
 import { Ship } from '../entities/Ship';
+import { ShipCustomizer } from '../entities/ShipCustomization';
 import { CameraRig } from '../camera/CameraRig';
 import { World } from '../world/World';
 import { ParticleSystem } from '../effects/ParticleSystem';
@@ -44,7 +45,18 @@ export function bootstrap() {
   const camera = new THREE.PerspectiveCamera(55, baseWidth / baseHeight, 0.1, 2000);
 
   const input = new Input();
-  const ship = new Ship();
+  
+  // Load or generate ship customization
+  const playerId = 'local'; // Will be replaced with actual player ID when we add auth
+  const savedCustomization = ShipCustomizer.loadFromLocalStorage(playerId);
+  const shipCustomization = savedCustomization || ShipCustomizer.generateRandomCustomization();
+  
+  // Save if it was generated
+  if (!savedCustomization) {
+    ShipCustomizer.saveToLocalStorage(playerId, shipCustomization);
+  }
+  
+  const ship = new Ship(shipCustomization);
   scene.add(ship.group);
 
   // Use room name as seed - each room has its own persistent world
@@ -217,7 +229,7 @@ export function bootstrap() {
   // Connect to multiplayer (always, since we always have a room now)
   if (room) {
     networkManager.connect().then(() => {
-      networkManager.joinRoom(room);
+      networkManager.joinRoom(room, shipCustomization);
       // Show welcome tip in chat
       chat.addSystemMessage(`Press T to open chat`);
       // Set player ID for material manager

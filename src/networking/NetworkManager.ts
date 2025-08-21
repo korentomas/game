@@ -15,6 +15,7 @@ export interface NetworkPlayer {
   nameTagGroup?: THREE.Group; // Separate group for UI scene
   isThrusting?: boolean;
   heading?: number;
+  customization?: any; // Ship customization data
 }
 
 interface InputCommand {
@@ -43,6 +44,7 @@ export class NetworkManager {
   public roomId: string = 'default';
   public remotePlayers = new Map<string, NetworkPlayer>();
   public isFirstPlayer: boolean = false; // Whether we're the first player in room
+  public localCustomization: any; // Local player's ship customization
   
   // Client-side prediction
   private inputSequence = 0;
@@ -94,12 +96,14 @@ export class NetworkManager {
     });
   }
   
-  joinRoom(roomId: string = 'default') {
+  joinRoom(roomId: string = 'default', customization?: any) {
     this.roomId = roomId;
+    this.localCustomization = customization;
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({
         type: 'join-room',
-        roomId: roomId
+        roomId: roomId,
+        customization: customization
       }));
     }
   }
