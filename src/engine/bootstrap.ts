@@ -66,9 +66,9 @@ export function bootstrap() {
   customizationMenu.setOnCustomizationChange((newCustomization) => {
     ship.applyCustomization(newCustomization);
     // Also update network manager if connected
-    if (networkManager.localCustomization) {
-      networkManager.localCustomization = newCustomization;
-    }
+    networkManager.localCustomization = newCustomization;
+    // Send customization update to other players
+    networkManager.sendCustomizationUpdate(newCustomization);
   });
 
   // Use room name as seed - each room has its own persistent world
