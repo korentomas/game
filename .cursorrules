@@ -1,0 +1,160 @@
+# Multiplayer Space Game Development Rules
+
+## Project Overview
+This is a multiplayer 3D space exploration and resource collection game built with Three.js, TypeScript, and WebRTC. Players pilot ships through a procedurally generated voxel world, collecting resources by destroying space junk.
+
+## Core Principles
+1. **Performance First**: Optimize for 60 FPS on mid-range hardware
+2. **Test Everything**: Write tests for new features before or during implementation
+3. **Multiplayer Ready**: All features must work in multiplayer context
+4. **Visual Polish**: Maintain retro-futuristic aesthetic with glowing neon elements
+
+## Code Style Guidelines
+
+### TypeScript
+- Use strict TypeScript with all compiler checks enabled
+- Prefer interfaces over type aliases for object shapes
+- Always specify return types for functions
+- Use `readonly` where applicable
+
+### Three.js
+- Reuse geometries and materials (static class members)
+- Dispose of resources properly to prevent memory leaks
+- Use object pooling for frequently created/destroyed objects
+- Implement LOD (Level of Detail) for distant objects
+
+### File Organization
+```
+src/
+  combat/       - Combat system (projectiles, damage)
+  effects/      - Visual effects (particles, explosions)
+  engine/       - Core game loop and systems
+  entities/     - Game entities (ships, drones)
+  items/        - Collectibles and inventory
+  networking/   - WebRTC and multiplayer
+  test/         - Test utilities and mocks
+  ui/           - User interface components
+  world/        - World generation and chunks
+```
+
+## Development Workflow
+
+### Before Starting Work
+1. Check TODO list with TodoWrite tool
+2. Run tests: `npm test`
+3. Ensure server is running: `npm run server`
+4. Start dev server: `npm run dev`
+
+### After Making Changes
+1. Run tests: `npm test`
+2. Build project: `npm run build`
+3. Update CLAUDE.md if adding new features
+4. Mark TODOs as completed
+
+### Testing Requirements
+- Minimum 80% code coverage for new features
+- Unit tests for all classes
+- Integration tests for complex interactions
+- Mock Three.js and WebGL for testing
+
+## Performance Optimization Strategies
+
+### Chunk System
+- 16x16x64 voxels per chunk
+- Web Worker mesh generation
+- Predictive loading based on movement
+- Memory and localStorage caching
+
+### Entity Management
+- Distance-based culling
+- Object pooling for projectiles/particles
+- LOD system (FULL/MEDIUM/LOW)
+- Adaptive quality based on frame time
+
+### Network Optimization
+- Mesh networking (peer-to-peer)
+- Delta compression for position updates
+- Interest management for distant players
+- Client-side prediction with reconciliation
+
+## Common Tasks
+
+### Adding New Weapon Type
+1. Create weapon class in `src/combat/`
+2. Add to ProjectileManager
+3. Update Ship.tryFire() method
+4. Add network sync in NetworkManager
+5. Write tests
+6. Update damage calculations
+
+### Adding New Material Type
+1. Add to MaterialType enum in MaterialDrop.ts
+2. Define config in MATERIALS object
+3. Update drop rates/rarity
+4. Add crafting recipes if applicable
+5. Update HUD display
+
+### Creating New Visual Effect
+1. Create effect class in `src/effects/`
+2. Add to EffectsManager
+3. Implement update() and dispose() methods
+4. Use object pooling if frequently created
+5. Add particle limits for performance
+
+### Implementing New UI Component
+1. Create component in `src/ui/`
+2. Use inline styles for consistency
+3. Maintain neon green (#00ff88) theme
+4. Add to bootstrap.ts initialization
+5. Implement dispose() method
+
+## Multiplayer Considerations
+
+### State Synchronization
+- Ship position/rotation/velocity
+- Projectile spawning/destruction
+- Junk destruction events
+- Material collection
+- Chat messages
+
+### Network Messages
+- Keep messages small (<1KB)
+- Use binary formats for position data
+- Batch updates when possible
+- Implement message priorities
+
+## Debug Commands
+- Check performance: Open browser DevTools Performance tab
+- View entity stats: Check console logs
+- Test multiplayer: Open multiple browser tabs
+- Inspect WebRTC: chrome://webrtc-internals
+
+## Known Issues & Solutions
+
+### Issue: Projectiles not visible to other players
+Solution: Ensure projectile spawn is sent via NetworkManager.sendShoot()
+
+### Issue: Performance drops with many chunks
+Solution: Adjust chunk processing budget in World.ts
+
+### Issue: Materials not being collected
+Solution: Check magnetRange in MaterialDrop.ts
+
+## Future Features (Priority Order)
+1. Ship damage visualization
+2. Crafting system for upgrades
+3. Rare materials in deep space
+4. Player trading system
+5. Voice chat integration
+6. Mobile controls support
+
+## External Resources
+- Three.js docs: https://threejs.org/docs
+- TypeScript handbook: https://www.typescriptlang.org/docs
+- WebRTC guide: https://webrtc.org/getting-started
+- Jest testing: https://jestjs.io/docs
+
+## Contact & Support
+- Report issues in GitHub issues
+- Check CLAUDE.md for AI assistant guidance
+- Run tests before committing: `npm test`

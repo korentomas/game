@@ -1,0 +1,19 @@
+{
+  "timestamp": "2025-08-21T01:50:09.775Z",
+  "status": "FAILED",
+  "passRate": 28.6,
+  "results": {
+    "passed": [
+      "websocket-connection",
+      "race-conditions"
+    ],
+    "failed": [
+      "unit-tests",
+      "room-join",
+      "material-sync",
+      "junk-sync",
+      "stress-test"
+    ],
+    "skipped": []
+  }
+}

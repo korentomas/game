@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Multiplayer Test Lobby</title>
+  <style>
+    body {
+      font-family: 'Courier New', monospace;
+      background: #0a0f14;
+      color: #00e5ff;
+      padding: 20px;
+      margin: 0;
+    }
+    
+    h1 {
+      color: #ff4d6d;
+      text-shadow: 0 0 10px #ff4d6d;
+    }
+    
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    
+    .test-section {
+      background: #1a2530;
+      border: 1px solid #00e5ff;
+      border-radius: 5px;
+      padding: 20px;
+      margin: 20px 0;
+      box-shadow: 0 0 20px rgba(0, 229, 255, 0.2);
+    }
+    
+    .test-controls {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin: 15px 0;
+    }
+    
+    button {
+      background: #2a3540;
+      color: #00e5ff;
+      border: 1px solid #00e5ff;
+      padding: 10px 20px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.3s;
+    }
+    
+    button:hover {
+      background: #00e5ff;
+      color: #0a0f14;
+      box-shadow: 0 0 10px #00e5ff;
+    }
+    
+    button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+    
+    .status {
+      padding: 10px;
+      background: #0a0f14;
+      border: 1px solid #444;
+      border-radius: 3px;
+      margin: 10px 0;
+      font-size: 12px;
+    }
+    
+    .log {
+      background: #0a0f14;
+      border: 1px solid #444;
+      border-radius: 3px;
+      padding: 10px;
+      height: 200px;
+      overflow-y: auto;
+      font-size: 12px;
+      margin: 10px 0;
+    }
+    
+    .log-entry {
+      margin: 2px 0;
+      padding: 2px 5px;
+    }
+    
+    .log-info { color: #00e5ff; }
+    .log-success { color: #00ff88; }
+    .log-warning { color: #ff8800; }
+    .log-error { color: #ff4d6d; }
+    
+    .client-frame {
+      border: 1px solid #00e5ff;
+      width: 100%;
+      height: 400px;
+      margin: 10px 0;
+    }
+    
+    .client-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+      margin: 20px 0;
+    }
+    
+    .client-box {
+      background: #1a2530;
+      border: 1px solid #00e5ff;
+      border-radius: 5px;
+      padding: 10px;
+    }
+    
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      margin: 10px 0;
+    }
+    
+    .metric {
+      background: #0a0f14;
+      border: 1px solid #444;
+      padding: 10px;
+      border-radius: 3px;
+    }
+    
+    .metric-label {
+      color: #888;
+      font-size: 11px;
+    }
+    
+    .metric-value {
+      color: #00e5ff;
+      font-size: 18px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎮 Multiplayer Test Lobby</h1>
+    
+    <!-- Connection Test -->
+    <div class="test-section">
+      <h2>Connection Test</h2>
+      <div class="test-controls">
+        <button onclick="testConnection()">Test WebSocket Connection</button>
+        <button onclick="testWebRTC()">Test WebRTC Connection</button>
+        <button onclick="testLatency()">Measure Latency</button>
+      </div>
+      <div class="status" id="connection-status">Ready to test...</div>
+      <div class="log" id="connection-log"></div>
+    </div>
+    
+    <!-- Sync Test -->
+    <div class="test-section">
+      <h2>Synchronization Test</h2>
+      <div class="test-controls">
+        <button onclick="testMaterialSync()">Test Material Sync</button>
+        <button onclick="testJunkSync()">Test Junk/Rock Sync</button>
+        <button onclick="testProjectileSync()">Test Projectile Sync</button>
+        <button onclick="testPositionSync()">Test Position Sync</button>
+        <button onclick="testChatSync()">Test Chat Sync</button>
+      </div>
+      <div class="metrics">
+        <div class="metric">
+          <div class="metric-label">Materials Synced</div>
+          <div class="metric-value" id="materials-synced">0</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Junk Synced</div>
+          <div class="metric-value" id="junk-synced">0</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Messages Sent</div>
+          <div class="metric-value" id="messages-sent">0</div>
+        </div>
+        <div class="metric">
+          <div class="metric-label">Sync Errors</div>
+          <div class="metric-value" id="sync-errors">0</div>
+        </div>
+      </div>
+      <div class="log" id="sync-log"></div>
+    </div>
+    
+    <!-- Stress Test -->
+    <div class="test-section">
+      <h2>Stress Test</h2>
+      <div class="test-controls">
+        <button onclick="stressTestMaterials()">Spawn 100 Materials</button>
+        <button onclick="stressTestProjectiles()">Fire 50 Projectiles</button>
+        <button onclick="stressTestMovement()">Rapid Movement Test</button>
+        <button onclick="stressTestConnections()">Simulate 10 Players</button>
+      </div>
+      <div class="status" id="stress-status">Ready for stress testing...</div>
+      <div class="log" id="stress-log"></div>
+    </div>
+    
+    <!-- Race Condition Test -->
+    <div class="test-section">
+      <h2>Race Condition Test</h2>
+      <div class="test-controls">
+        <button onclick="testSimultaneousCollection()">Simultaneous Material Collection</button>
+        <button onclick="testSimultaneousDestruction()">Simultaneous Junk Destruction</button>
+        <button onclick="testRapidFireCollection()">Rapid Fire Collection</button>
+      </div>
+      <div class="log" id="race-log"></div>
+    </div>
+    
+    <!-- Multi-Client Test -->
+    <div class="test-section">
+      <h2>Multi-Client Test</h2>
+      <div class="test-controls">
+        <button onclick="launchTestClients()">Launch 2 Test Clients</button>
+        <button onclick="simulateActions()">Simulate Actions</button>
+        <button onclick="validateSync()">Validate Sync State</button>
+      </div>
+      <div class="client-container">
+        <div class="client-box">
+          <h3>Client 1 (Host)</h3>
+          <iframe id="client1" class="client-frame"></iframe>
+        </div>
+        <div class="client-box">
+          <h3>Client 2</h3>
+          <iframe id="client2" class="client-frame"></iframe>
+        </div>
+      </div>
+    </div>
+    
+    <!-- Automated Test Suite -->
+    <div class="test-section">
+      <h2>Automated Test Suite</h2>
+      <div class="test-controls">
+        <button onclick="runAllTests()">🚀 Run All Tests</button>
+        <button onclick="runCriticalTests()">Run Critical Tests Only</button>
+        <button onclick="generateReport()">Generate Report</button>
+      </div>
+      <div class="status" id="suite-status">Test suite ready</div>
+      <div class="log" id="suite-log"></div>
+    </div>
+  </div>
+  
+  <script>
+    let ws = null;
+    let testRoom = 'test-' + Math.random().toString(36).slice(2, 8);
+    let materialssynced = 0;
+    let junkSynced = 0;
+    let messagesSent = 0;
+    let syncErrors = 0;
+    
+    function log(section, message, type = 'info') {
+      const logEl = document.getElementById(section + '-log');
+      if (!logEl) return;
+      
+      const entry = document.createElement('div');
+      entry.className = 'log-entry log-' + type;
+      entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+      logEl.appendChild(entry);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+    
+    function updateMetric(id, value) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = value;
+    }
+    
+    // Connection Tests
+    function testConnection() {
+      log('connection', 'Testing WebSocket connection...', 'info');
+      
+      ws = new WebSocket('ws://localhost:3001');
+      
+      ws.onopen = () => {
+        log('connection', 'WebSocket connected successfully!', 'success');
+        document.getElementById('connection-status').textContent = 'Connected to server';
+        
+        // Join test room
+        ws.send(JSON.stringify({
+          type: 'join-room',
+          roomId: testRoom
+        }));
+      };
+      
+      ws.onerror = (error) => {
+        log('connection', 'WebSocket error: ' + error, 'error');
+        document.getElementById('connection-status').textContent = 'Connection failed';
+      };
+      
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        log('connection', 'Received: ' + data.type, 'info');
+        
+        // Track metrics
+        if (data.type === 'material-spawn') {
+          materialssynced++;
+          updateMetric('materials-synced', materialssynced);
+        } else if (data.type === 'junk-spawn') {
+          junkSynced++;
+          updateMetric('junk-synced', junkSynced);
+        }
+      };
+    }
+    
+    function testWebRTC() {
+      log('connection', 'Testing WebRTC connection...', 'info');
+      // Implement WebRTC test
+      log('connection', 'WebRTC test not yet implemented', 'warning');
+    }
+    
+    function testLatency() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        log('connection', 'Not connected. Connect first!', 'error');
+        return;
+      }
+      
+      const startTime = Date.now();
+      const pingId = Math.random().toString(36);
+      
+      // Send a chat message as ping
+      ws.send(JSON.stringify({
+        type: 'chat-message',
+        text: 'ping-' + pingId
+      }));
+      
+      // Listen for echo
+      const handler = (event) => {
+        const data = JSON.parse(event.data);
+        if (data.type === 'chat-message' && data.text && data.text.includes(pingId)) {
+          const latency = Date.now() - startTime;
+          log('connection', `Latency: ${latency}ms`, 'success');
+          ws.removeEventListener('message', handler);
+        }
+      };
+      
+      ws.addEventListener('message', handler);
+      
+      // Timeout after 5 seconds
+      setTimeout(() => {
+        ws.removeEventListener('message', handler);
+        log('connection', 'Latency test timed out', 'error');
+      }, 5000);
+    }
+    
+    // Sync Tests
+    function testMaterialSync() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        log('sync', 'Not connected. Connect first!', 'error');
+        return;
+      }
+      
+      log('sync', 'Testing material synchronization...', 'info');
+      
+      // Simulate material spawn
+      const materialData = {
+        type: 'material-spawn',
+        id: 'test_mat_' + Date.now(),
+        position: { x: Math.random() * 100, y: 10, z: Math.random() * 100 },
+        materialType: 'scrap_metal'
+      };
+      
+      ws.send(JSON.stringify(materialData));
+      messagesSent++;
+      updateMetric('messages-sent', messagesSent);
+      log('sync', 'Sent material spawn: ' + materialData.id, 'success');
+      
+      // Simulate collection after 1 second
+      setTimeout(() => {
+        ws.send(JSON.stringify({
+          type: 'material-collect',
+          id: materialData.id,
+          collectorId: 'test-player'
+        }));
+        messagesSent++;
+        updateMetric('messages-sent', messagesSent);
+        log('sync', 'Sent material collect: ' + materialData.id, 'success');
+      }, 1000);
+    }
+    
+    function testJunkSync() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        log('sync', 'Not connected. Connect first!', 'error');
+        return;
+      }
+      
+      log('sync', 'Testing junk synchronization...', 'info');
+      
+      // Simulate junk spawn
+      const junkData = {
+        type: 'junk-spawn',
+        chunkKey: '0,0',
+        junkData: [
+          { id: 'junk_test_1', position: { x: 10, y: 5, z: 10 }, size: 1.2 },
+          { id: 'junk_test_2', position: { x: 15, y: 5, z: 15 }, size: 0.8 }
+        ]
+      };
+      
+      ws.send(JSON.stringify(junkData));
+      messagesSent++;
+      updateMetric('messages-sent', messagesSent);
+      log('sync', 'Sent junk spawn for chunk: ' + junkData.chunkKey, 'success');
+      
+      // Simulate destruction after 2 seconds
+      setTimeout(() => {
+        ws.send(JSON.stringify({
+          type: 'junk-destroy',
+          junkId: 'junk_test_1',
+          destroyerId: 'test-player'
+        }));
+        messagesSent++;
+        updateMetric('messages-sent', messagesSent);
+        log('sync', 'Sent junk destroy: junk_test_1', 'success');
+      }, 2000);
+    }
+    
+    // Stress Tests
+    function stressTestMaterials() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        log('stress', 'Not connected. Connect first!', 'error');
+        return;
+      }
+      
+      log('stress', 'Spawning 100 materials...', 'info');
+      document.getElementById('stress-status').textContent = 'Running material stress test...';
+      
+      let spawned = 0;
+      const interval = setInterval(() => {
+        if (spawned >= 100) {
+          clearInterval(interval);
+          log('stress', 'Completed spawning 100 materials', 'success');
+          document.getElementById('stress-status').textContent = 'Material stress test complete';
+          return;
+        }
+        
+        const materialData = {
+          type: 'material-spawn',
+          id: 'stress_mat_' + spawned,
+          position: { 
+            x: Math.random() * 200 - 100, 
+            y: 10 + Math.random() * 10, 
+            z: Math.random() * 200 - 100 
+          },
+          materialType: ['scrap_metal', 'energy_crystal', 'rare_alloy'][Math.floor(Math.random() * 3)]
+        };
+        
+        ws.send(JSON.stringify(materialData));
+        spawned++;
+        messagesSent++;
+        updateMetric('messages-sent', messagesSent);
+        
+        if (spawned % 10 === 0) {
+          log('stress', `Spawned ${spawned}/100 materials`, 'info');
+        }
+      }, 50); // 20 per second
+    }
+    
+    // Race Condition Tests
+    function testSimultaneousCollection() {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        log('race', 'Not connected. Connect first!', 'error');
+        return;
+      }
+      
+      log('race', 'Testing simultaneous material collection...', 'info');
+      
+      // First spawn a material
+      const materialId = 'race_mat_' + Date.now();
+      ws.send(JSON.stringify({
+        type: 'material-spawn',
+        id: materialId,
+        position: { x: 0, y: 10, z: 0 },
+        materialType: 'energy_crystal'
+      }));
+      
+      // After 500ms, simulate two players collecting at the same time
+      setTimeout(() => {
+        log('race', 'Simulating simultaneous collection...', 'warning');
+        
+        // Player 1 collects
+        ws.send(JSON.stringify({
+          type: 'material-collect',
+          id: materialId,
+          collectorId: 'player1'
+        }));
+        
+        // Player 2 collects at nearly the same time
+        setTimeout(() => {
+          ws.send(JSON.stringify({
+            type: 'material-collect',
+            id: materialId,
+            collectorId: 'player2'
+          }));
+        }, 10); // 10ms delay to simulate network variance
+        
+        log('race', 'Both collection requests sent', 'success');
+      }, 500);
+    }
+    
+    // Multi-client test
+    function launchTestClients() {
+      log('suite', 'Launching test clients...', 'info');
+      
+      const client1 = document.getElementById('client1');
+      const client2 = document.getElementById('client2');
+      
+      client1.src = `/?room=${testRoom}-client`;
+      client2.src = `/?room=${testRoom}-client`;
+      
+      log('suite', 'Test clients launched in room: ' + testRoom + '-client', 'success');
+    }
+    
+    // Run all tests
+    async function runAllTests() {
+      log('suite', 'Starting comprehensive test suite...', 'info');
+      document.getElementById('suite-status').textContent = 'Running tests...';
+      
+      const tests = [
+        { name: 'Connection Test', fn: testConnection, delay: 2000 },
+        { name: 'Material Sync', fn: testMaterialSync, delay: 3000 },
+        { name: 'Junk Sync', fn: testJunkSync, delay: 3000 },
+        { name: 'Latency Test', fn: testLatency, delay: 2000 },
+        { name: 'Stress Test Materials', fn: stressTestMaterials, delay: 6000 },
+        { name: 'Race Condition Test', fn: testSimultaneousCollection, delay: 3000 }
+      ];
+      
+      let testIndex = 0;
+      
+      function runNextTest() {
+        if (testIndex >= tests.length) {
+          log('suite', 'All tests completed!', 'success');
+          document.getElementById('suite-status').textContent = 'Test suite complete';
+          generateReport();
+          return;
+        }
+        
+        const test = tests[testIndex];
+        log('suite', `Running: ${test.name}`, 'info');
+        document.getElementById('suite-status').textContent = `Running: ${test.name}`;
+        
+        try {
+          test.fn();
+        } catch (error) {
+          log('suite', `Error in ${test.name}: ${error}`, 'error');
+          syncErrors++;
+          updateMetric('sync-errors', syncErrors);
+        }
+        
+        testIndex++;
+        setTimeout(runNextTest, test.delay);
+      }
+      
+      runNextTest();
+    }
+    
+    function generateReport() {
+      const report = {
+        timestamp: new Date().toISOString(),
+        metrics: {
+          materialssynced,
+          junkSynced,
+          messagesSent,
+          syncErrors
+        },
+        status: syncErrors === 0 ? 'PASSED' : 'FAILED'
+      };
+      
+      log('suite', '=== TEST REPORT ===', 'info');
+      log('suite', `Status: ${report.status}`, report.status === 'PASSED' ? 'success' : 'error');
+      log('suite', `Materials Synced: ${report.metrics.materialssynced}`, 'info');
+      log('suite', `Junk Synced: ${report.metrics.junkSynced}`, 'info');
+      log('suite', `Messages Sent: ${report.metrics.messagesSent}`, 'info');
+      log('suite', `Sync Errors: ${report.metrics.syncErrors}`, 'info');
+      
+      // Copy report to clipboard
+      navigator.clipboard.writeText(JSON.stringify(report, null, 2));
+      log('suite', 'Report copied to clipboard', 'success');
+    }
+  </script>
+</body>
+</html>
