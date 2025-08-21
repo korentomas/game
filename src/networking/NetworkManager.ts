@@ -131,13 +131,13 @@ export class NetworkManager {
           console.log('Other players already in room - waiting for junk sync');
         }
         for (const playerData of message.players) {
-          this.addRemotePlayer(playerData.id, playerData.position, playerData.rotation, playerData.customization);
+          this.addRemotePlayer(playerData.id, playerData.position, playerData.rotation, playerData.customization, playerData.username);
         }
         break;
         
       case 'player-joined':
         // New player joined
-        this.addRemotePlayer(message.playerId, message.position, message.rotation, message.customization);
+        this.addRemotePlayer(message.playerId, message.position, message.rotation, message.customization, message.username);
         // Initiate WebRTC connection as the caller
         await this.initiateWebRTC(message.playerId);
         break;
@@ -165,10 +165,10 @@ export class NetworkManager {
         
       case 'chat-message':
         // Received chat message from another player
-        const player = this.remotePlayers.get(message.playerId);
-        const playerName = player?.name || `Player-${message.playerId.substring(0, 4).toUpperCase()}`;
+        // Use the playerName from the message (sent by server with actual username)
+        const playerName = message.playerName || `Player-${message.playerId.substring(0, 4).toUpperCase()}`;
         console.log('Received chat via WebSocket from', message.playerId, ':', message.text);
-        if (this.onChatMessage && message.playerId !== this.localPlayerId) {
+        if (this.onChatMessage) {
           this.onChatMessage(message.playerId, playerName, message.text);
         }
         break;
@@ -518,11 +518,11 @@ export class NetworkManager {
     }
   }
   
-  private addRemotePlayer(id: string, position: any, rotation: number, customization?: any) {
+  private addRemotePlayer(id: string, position: any, rotation: number, customization?: any, username?: string) {
     if (this.remotePlayers.has(id)) return;
     
-    // Generate a fun name for the player (can be replaced with actual names later)
-    const name = `Player-${id.substring(0, 4).toUpperCase()}`;
+    // Use provided username or fallback to generated name
+    const name = username || `Player-${id.substring(0, 4).toUpperCase()}`;
     
     // Create RemoteShip with customization
     const remoteShip = new RemoteShip(customization);

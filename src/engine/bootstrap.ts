@@ -21,10 +21,45 @@ import { MaterialManager } from '../items/MaterialManager';
 import { MaterialType } from '../items/MaterialDrop';
 import { HUD } from '../ui/HUD';
 import { CustomizationMenu } from '../ui/CustomizationMenu';
+import { LoginScreen } from '../ui/LoginScreen';
+import { AuthManager } from '../auth/AuthManager';
 
-export function bootstrap() {
+export async function bootstrap() {
   const appEl = document.getElementById('app')!;
   const uiEl = document.getElementById('ui')!;
+
+  // Initialize auth manager
+  const authManager = new AuthManager();
+  let userSession = authManager.getSession();
+  
+  // Check if we have a valid session
+  if (userSession) {
+    const isValid = await authManager.validateSession();
+    if (!isValid) {
+      userSession = null;
+    }
+  }
+  
+  // Show login screen if not authenticated
+  if (!userSession) {
+    const loginScreen = new LoginScreen();
+    
+    // Wait for login
+    userSession = await new Promise<any>((resolve, reject) => {
+      loginScreen.setOnLogin(async (username) => {
+        try {
+          const session = await authManager.login(username);
+          loginScreen.hide();
+          resolve(session);
+        } catch (error: any) {
+          loginScreen.showLoginError(error.message || 'Login failed');
+          // Don't resolve, let user try again
+        }
+      });
+    });
+  }
+  
+  console.log(`Logged in as ${userSession.username} (${userSession.userId})`);
 
   const pixelScale = 3; // retro upscale factor
   const baseWidth = Math.floor(window.innerWidth / pixelScale);
@@ -48,7 +83,7 @@ export function bootstrap() {
   const input = new Input();
   
   // Load or generate ship customization
-  const playerId = 'local'; // Will be replaced with actual player ID when we add auth
+  const playerId = userSession.userId;
   const savedCustomization = ShipCustomizer.loadFromLocalStorage(playerId);
   const shipCustomization = savedCustomization || ShipCustomizer.getClassic(); // Use classic look by default
   
@@ -220,7 +255,7 @@ export function bootstrap() {
   
   // Setup chat callbacks
   chat.setOnSendMessage((text) => {
-    const localPlayerName = networkManager.localPlayerName || 'You';
+    const localPlayerName = userSession.username;
     
     // Add the message to our own chat immediately
     chat.addMessage({
@@ -243,7 +278,7 @@ export function bootstrap() {
     networkManager.connect().then(() => {
       networkManager.joinRoom(room, shipCustomization);
       // Show welcome tips in chat
-      chat.addSystemMessage(`Press T to open chat, C to customize ship`);
+      chat.addSystemMessage(`Welcome ${userSession.username}! Press T to open chat, C to customize ship`);
       // Set player ID for material manager
       materialManager.setPlayerId(networkManager.localPlayerId);
       // Junk generation is now deterministic - all players generate the same junk locally

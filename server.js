@@ -1,5 +1,6 @@
 const WebSocket = require('ws');
 const http = require('http');
+const crypto = require('crypto');
 
 const server = http.createServer();
 const wss = new WebSocket.Server({ server });
@@ -8,12 +9,18 @@ const wss = new WebSocket.Server({ server });
 const rooms = new Map(); // roomId -> Set of player connections
 const playerRooms = new Map(); // ws -> roomId
 
+// Simple in-memory user storage (replace with Redis later)
+const users = new Map(); // username -> user data
+const sessions = new Map(); // token -> session data
+
 class Player {
-  constructor(ws, id) {
+  constructor(ws, id, username = null) {
     this.ws = ws;
     this.id = id;
+    this.username = username;
     this.position = { x: 0, y: 10, z: 0 };
     this.rotation = 0;
+    this.customization = null;
   }
 }
 
@@ -26,9 +33,20 @@ wss.on('connection', (ws) => {
       const data = JSON.parse(message);
       
       switch (data.type) {
+        case 'auth-login': {
+          handleLogin(ws, data.username);
+          break;
+        }
+        
+        case 'auth-validate': {
+          handleValidateSession(ws, data.token);
+          break;
+        }
+        
         case 'join-room': {
           const roomId = data.roomId || 'default';
-          joinRoom(ws, playerId, roomId);
+          const customization = data.customization || null;
+          joinRoom(ws, playerId, roomId, customization);
           break;
         }
         
@@ -73,11 +91,16 @@ wss.on('connection', (ws) => {
           if (roomId) {
             const room = rooms.get(roomId);
             if (room) {
+              // Find the sender to get their username
+              const sender = Array.from(room).find(p => p.ws === ws);
+              const senderName = sender?.username || `Player-${playerId.substr(0, 6)}`;
+              
               room.forEach(player => {
                 if (player.ws.readyState === WebSocket.OPEN) {
                   player.ws.send(JSON.stringify({
                     type: 'chat-message',
                     playerId: playerId,
+                    playerName: senderName,
                     text: data.text
                   }));
                 }
@@ -257,7 +280,7 @@ wss.on('connection', (ws) => {
   }));
 });
 
-function joinRoom(ws, playerId, roomId) {
+function joinRoom(ws, playerId, roomId, customization = null) {
   // Leave current room if any
   leaveRoom(ws, playerId);
   
@@ -267,7 +290,10 @@ function joinRoom(ws, playerId, roomId) {
   }
   
   const room = rooms.get(roomId);
-  const player = new Player(ws, playerId);
+  // Get username from session if available
+  const username = ws.username || null;
+  const player = new Player(ws, playerId, username);
+  player.customization = customization;
   room.add(player);
   playerRooms.set(ws, roomId);
   
@@ -283,8 +309,10 @@ function joinRoom(ws, playerId, roomId) {
     .filter(p => p.ws !== ws)
     .map(p => ({
       id: p.id,
+      username: p.username,
       position: p.position,
-      rotation: p.rotation
+      rotation: p.rotation,
+      customization: p.customization
     }));
     
   if (otherPlayers.length > 0) {
@@ -300,8 +328,10 @@ function joinRoom(ws, playerId, roomId) {
       other.ws.send(JSON.stringify({
         type: 'player-joined',
         playerId: playerId,
+        username: player.username,
         position: player.position,
-        rotation: player.rotation
+        rotation: player.rotation,
+        customization: player.customization
       }));
     }
   });
@@ -339,6 +369,91 @@ function leaveRoom(ws, playerId) {
   }
   
   console.log(`Player ${playerId} left room ${roomId}`);
+}
+
+// Authentication functions
+function handleLogin(ws, username) {
+  // Validate username
+  if (!username || username.length < 3 || username.length > 20) {
+    ws.send(JSON.stringify({
+      type: 'auth-error',
+      error: 'Invalid username'
+    }));
+    return;
+  }
+  
+  // Check if username is already taken (case-insensitive)
+  const lowerUsername = username.toLowerCase();
+  const existingUser = Array.from(users.values()).find(
+    u => u.username.toLowerCase() === lowerUsername
+  );
+  
+  if (existingUser) {
+    ws.send(JSON.stringify({
+      type: 'auth-error',
+      error: 'Username already taken'
+    }));
+    return;
+  }
+  
+  // Create new user
+  const userId = crypto.randomBytes(16).toString('hex');
+  const token = crypto.randomBytes(32).toString('hex');
+  
+  const userData = {
+    userId: userId,
+    username: username,
+    createdAt: Date.now(),
+    customization: null
+  };
+  
+  users.set(userId, userData);
+  sessions.set(token, {
+    userId: userId,
+    username: username,
+    createdAt: Date.now()
+  });
+  
+  // Store username on the websocket for later use
+  ws.username = username;
+  ws.userId = userId;
+  
+  console.log(`User ${username} (${userId}) logged in`);
+  
+  ws.send(JSON.stringify({
+    type: 'auth-success',
+    username: username,
+    userId: userId,
+    token: token
+  }));
+}
+
+function handleValidateSession(ws, token) {
+  const session = sessions.get(token);
+  
+  if (session) {
+    // Check if session is still valid (24 hours)
+    const age = Date.now() - session.createdAt;
+    if (age < 24 * 60 * 60 * 1000) {
+      ws.send(JSON.stringify({
+        type: 'auth-valid',
+        username: session.username,
+        userId: session.userId
+      }));
+      
+      // Store username on the websocket
+      ws.username = session.username;
+      ws.userId = session.userId;
+      return;
+    } else {
+      // Session expired
+      sessions.delete(token);
+    }
+  }
+  
+  ws.send(JSON.stringify({
+    type: 'auth-invalid'
+  }));
 }
 
 const PORT = process.env.PORT || 3001;
