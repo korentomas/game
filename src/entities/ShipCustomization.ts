@@ -64,8 +64,39 @@ export class ShipCustomizer {
   }
   
   static saveToLocalStorage(playerId: string, customization: ShipCustomization) {
-    const key = `ship_customization_${playerId}`;
-    localStorage.setItem(key, JSON.stringify(customization));
+    try {
+      const key = `ship_customization_${playerId}`;
+      // Only save essential data, not the entire object
+      const dataToSave = {
+        colors: customization.colors,
+        modelType: customization.modelType,
+        decalType: customization.decalType
+      };
+      localStorage.setItem(key, JSON.stringify(dataToSave));
+    } catch (e) {
+      // Handle quota exceeded error gracefully
+      console.warn('Failed to save ship customization to localStorage:', e);
+      // Try to clear old data if quota exceeded
+      if (e instanceof DOMException && e.name === 'QuotaExceededError') {
+        try {
+          // Clear old chunk cache data which takes up most space
+          const keysToRemove: string[] = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const key = localStorage.key(i);
+            if (key && key.startsWith('chunk_')) {
+              keysToRemove.push(key);
+            }
+          }
+          keysToRemove.forEach(key => localStorage.removeItem(key));
+          console.log(`Cleared ${keysToRemove.length} old chunk cache entries`);
+          // Try again after clearing
+          const key = `ship_customization_${playerId}`;
+          localStorage.setItem(key, JSON.stringify(customization));
+        } catch (retryError) {
+          console.error('Still failed after clearing cache:', retryError);
+        }
+      }
+    }
   }
   
   static applyCustomization(

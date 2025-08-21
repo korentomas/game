@@ -23,8 +23,15 @@ export class Input {
 
     addEventListener('mousedown', e => {
       this.mouseButtons.add(e.button);
-      if (!this.pointerLocked) {
-        document.body.requestPointerLock?.();
+      if (!this.pointerLocked && document.body.requestPointerLock) {
+        // Request pointer lock with promise error handling
+        document.body.requestPointerLock()
+          .catch(err => {
+            // User cancelled or error occurred - this is fine
+            if (err.name !== 'SecurityError') {
+              console.warn('Pointer lock request failed:', err);
+            }
+          });
       }
     });
     addEventListener('mouseup', e => this.mouseButtons.delete(e.button));
