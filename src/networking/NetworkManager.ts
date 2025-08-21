@@ -96,14 +96,15 @@ export class NetworkManager {
     });
   }
   
-  joinRoom(roomId: string = 'default', customization?: any) {
+  joinRoom(roomId: string = 'default', customization?: any, sessionToken?: string) {
     this.roomId = roomId;
     this.localCustomization = customization;
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({
         type: 'join-room',
         roomId: roomId,
-        customization: customization
+        customization: customization,
+        token: sessionToken
       }));
     }
   }

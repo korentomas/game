@@ -276,7 +276,7 @@ export async function bootstrap() {
   // Connect to multiplayer (always, since we always have a room now)
   if (room) {
     networkManager.connect().then(() => {
-      networkManager.joinRoom(room, shipCustomization);
+      networkManager.joinRoom(room, shipCustomization, userSession.token);
       // Show welcome tips in chat
       chat.addSystemMessage(`Welcome ${userSession.username}! Press T to open chat, C to customize ship`);
       // Set player ID for material manager

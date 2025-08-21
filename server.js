@@ -25,8 +25,9 @@ class Player {
 }
 
 wss.on('connection', (ws) => {
-  const playerId = Math.random().toString(36).substr(2, 9);
-  console.log(`Player ${playerId} connected`);
+  // Generate a temporary ID - will be replaced with userId if authenticated
+  let playerId = Math.random().toString(36).substr(2, 9);
+  console.log(`Connection ${playerId} established`);
 
   ws.on('message', (message) => {
     try {
@@ -46,6 +47,18 @@ wss.on('connection', (ws) => {
         case 'join-room': {
           const roomId = data.roomId || 'default';
           const customization = data.customization || null;
+          
+          // If a token is provided, validate it and get the username
+          if (data.token) {
+            const session = sessions.get(data.token);
+            if (session) {
+              // Valid session - use userId as playerId for consistency
+              ws.username = session.username;
+              ws.userId = session.userId;
+              playerId = session.userId; // Use userId as playerId so refreshes keep same ID
+            }
+          }
+          
           joinRoom(ws, playerId, roomId, customization);
           break;
         }
@@ -290,6 +303,15 @@ function joinRoom(ws, playerId, roomId, customization = null) {
   }
   
   const room = rooms.get(roomId);
+  
+  // Check if this player ID is already in the room (reconnection)
+  const existingPlayer = Array.from(room).find(p => p.id === playerId);
+  if (existingPlayer) {
+    // Remove the old connection
+    room.delete(existingPlayer);
+    playerRooms.delete(existingPlayer.ws);
+    console.log(`Removed stale connection for player ${playerId}`);
+  }
   // Get username from session if available
   const username = ws.username || null;
   const player = new Player(ws, playerId, username);
