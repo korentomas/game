@@ -39,8 +39,8 @@ export class Chat {
       background: rgba(0, 0, 0, 0.05);
       display: none;
       flex-direction: column;
-      font-family: 'Courier New', monospace;
-      font-size: 14px;
+      font-family: 'Press Start 2P', monospace;
+      font-size: 10px;
       color: #ffffff;
       pointer-events: none;
     `;
@@ -75,8 +75,8 @@ export class Chat {
         background: none;
         color: white;
         padding: 4px 6px;
-        font-family: 'Courier New', monospace;
-        font-size: 16px;
+        font-family: 'Press Start 2P', monospace;
+        font-size: 10px;
         font-weight: bold;
         text-shadow: 2px 2px 0px rgba(0, 0, 0, 1), -1px -1px 0px rgba(0, 0, 0, 1), 1px -1px 0px rgba(0, 0, 0, 1), -1px 1px 0px rgba(0, 0, 0, 1);
         pointer-events: none;
@@ -163,8 +163,8 @@ export class Chat {
       border-radius: 2px;
       padding: 5px 10px;
       color: #ffffff;
-      font-family: 'Courier New', monospace;
-      font-size: 14px;
+      font-family: 'Press Start 2P', monospace;
+      font-size: 9px;
       text-shadow: 1px 1px 0px rgba(0, 0, 0, 0.8);
     `;
     
