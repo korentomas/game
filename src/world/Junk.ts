@@ -306,6 +306,7 @@ export class JunkManager {
       
       // Start invisible and register for fade-in effect
       j.group.visible = false;
+      if (!j.group.userData) j.group.userData = {};
       j.group.userData.isFadingOut = false;
       this.fadeManager.registerEntity(j.group, true);
       
@@ -335,8 +336,8 @@ export class JunkManager {
   
   // Spawn junk from network (remote player generated it)
   spawnRemoteJunk(chunkKey: string, junkData: Array<{id: string, position: THREE.Vector3, size: number}>) {
-    if (this.placed.has(chunkKey)) return; // Already have junk for this chunk
-    this.placed.add(chunkKey);
+    if (this.activeChunks.has(chunkKey)) return; // Already have junk for this chunk
+    this.activeChunks.add(chunkKey);
     
     const chunkJunk: JunkPiece[] = [];
     const localRng = seededRandom(chunkKey); // Use chunk key for consistent randomness
@@ -357,6 +358,7 @@ export class JunkManager {
       
       // Start invisible and register for fade-in effect
       j.group.visible = false;
+      if (!j.group.userData) j.group.userData = {};
       j.group.userData.isFadingOut = false;
       this.fadeManager.registerEntity(j.group, true);
       
@@ -630,6 +632,58 @@ export class JunkManager {
     // Store reference for pooling
     (junk.group as any).junkPiece = junk;
     this.entityManager.returnToPool(junk.group, EntityType.JUNK);
+  }
+  
+  // Magnetization support methods
+  private magnetizedJunk = new Set<string>(); // Track which junk is being magnetized
+  
+  getNearbyJunkIds(position: THREE.Vector3, radius: number): string[] {
+    const nearbyIds: string[] = [];
+    
+    this.junk.forEach(junk => {
+      if (this.magnetizedJunk.has(junk.id)) return; // Skip already magnetized
+      
+      const distance = junk.position.distanceTo(position);
+      if (distance <= radius) {
+        nearbyIds.push(junk.id);
+      }
+    });
+    
+    return nearbyIds;
+  }
+  
+  setMagnetized(junkId: string, magnetized: boolean) {
+    if (magnetized) {
+      this.magnetizedJunk.add(junkId);
+    } else {
+      this.magnetizedJunk.delete(junkId);
+    }
+  }
+  
+  updateRemotePosition(junkId: string, position: THREE.Vector3, velocity: THREE.Vector3) {
+    const junk = this.junkById.get(junkId);
+    if (junk && this.magnetizedJunk.has(junkId)) {
+      // Smoothly interpolate to server position
+      junk.group.position.lerp(position, 0.2);
+      junk.position.copy(junk.group.position);
+    }
+  }
+  
+  collectJunk(junkId: string, isLocalPlayer: boolean) {
+    const junk = this.junkById.get(junkId);
+    if (!junk) return;
+    
+    // Remove from tracking
+    this.magnetizedJunk.delete(junkId);
+    this.destroyedJunkIds.add(junkId);
+    
+    // Visual effect for collection
+    if (this.effectsManager && isLocalPlayer) {
+      this.effectsManager.spawnCollectionEffect(junk.group.position.clone());
+    }
+    
+    // Remove the junk
+    this.removeJunk(junk);
   }
 }
 

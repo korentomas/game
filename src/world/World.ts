@@ -97,11 +97,17 @@ export class World {
     this.noise2 = createNoise2D(rng);
     
     // Initialize worker
-    this.worker = new Worker(new URL('./mesher.worker.ts', import.meta.url), { type: 'module' });
-    this.worker.onmessage = (e: MessageEvent) => {
-      const msg = e.data as { k: string; positions: ArrayBuffer; normals: ArrayBuffer; colors: ArrayBuffer; lod: LODLevel };
-      this.meshApplyQueue.push(msg);
-    };
+    // Create worker - handle Jest environment where import.meta is not available
+    if (typeof process !== 'undefined' && process.env.NODE_ENV === 'test') {
+      // Mock worker for tests
+      this.worker = { postMessage: () => {}, terminate: () => {}, onmessage: null } as any;
+    } else {
+      this.worker = new Worker(new URL('./mesher.worker.ts', import.meta.url), { type: 'module' });
+      this.worker.onmessage = (e: MessageEvent) => {
+        const msg = e.data as { k: string; positions: ArrayBuffer; normals: ArrayBuffer; colors: ArrayBuffer; lod: LODLevel };
+        this.meshApplyQueue.push(msg);
+      };
+    }
     
     // Initialize geometry pools with larger capacity
     for (const lodLevel of [LODLevel.FULL, LODLevel.MEDIUM, LODLevel.LOW]) {

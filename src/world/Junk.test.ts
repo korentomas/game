@@ -31,7 +31,7 @@ describe('JunkManager', () => {
 
   describe('Junk Generation', () => {
     it('should generate junk when first player', () => {
-      junkManager.setIsFirstPlayer(true);
+      // No longer need to set first player - junk generation is deterministic
       
       const mockGroup = new THREE.Group();
       mockGroup.position.set(0, 0, 0);
@@ -48,7 +48,7 @@ describe('JunkManager', () => {
     });
 
     it('should not generate junk when not first player', () => {
-      junkManager.setIsFirstPlayer(false);
+      // No longer need to set first player - junk generation is deterministic
       
       const mockGroup = new THREE.Group();
       mockGroup.position.set(0, 0, 0);
@@ -60,7 +60,7 @@ describe('JunkManager', () => {
     });
 
     it('should not spawn junk in same chunk twice', () => {
-      junkManager.setIsFirstPlayer(true);
+      // No longer need to set first player - junk generation is deterministic
       
       const mockGroup = new THREE.Group();
       mockGroup.position.set(0, 0, 0);
@@ -187,7 +187,7 @@ describe('JunkManager', () => {
 
   describe('Network Message Handling', () => {
     it('should send junk spawn message when generating as first player', () => {
-      junkManager.setIsFirstPlayer(true);
+      // No longer need to set first player - junk generation is deterministic
       
       const mockGroup = new THREE.Group();
       mockGroup.position.set(0, 0, 0);
@@ -297,8 +297,7 @@ describe('JunkManager', () => {
         onJunkSpawn: (key, data) => callbacks2.push({ key, data })
       });
       
-      manager1.setIsFirstPlayer(true);
-      manager2.setIsFirstPlayer(true);
+      // No longer need to set first player - junk generation is deterministic
       
       const mockGroup = new THREE.Group();
       

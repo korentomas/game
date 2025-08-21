@@ -7,7 +7,9 @@ export class MaterialManager {
   private onCollect?: (type: MaterialType, value: number, materialId: string) => void;
   private onMagnetizing?: (materialId: string, position: THREE.Vector3) => void;
   private nextId: number = 0;
-  private playerId: string = 'local';
+  private playerId: string = 'offline';
+  private lastPositions: Map<string, THREE.Vector3> = new Map();
+  private remoteMagnetizing: Map<string, {target: THREE.Vector3, startTime: number}> = new Map();
   
   constructor(onCollect?: (type: MaterialType, value: number, materialId: string) => void) {
     this.group = new THREE.Group();
@@ -26,7 +28,6 @@ export class MaterialManager {
     const spawned: Array<{id: string, position: THREE.Vector3, type: MaterialType}> = [];
     
     for (let i = 0; i < count; i++) {
-      // Random offset for spawn position
       const offset = new THREE.Vector3(
         (Math.random() - 0.5) * 4,
         1 + Math.random() * 2,
@@ -47,9 +48,7 @@ export class MaterialManager {
     return spawned;
   }
   
-  // Spawn material from network (remote player spawned it)
   spawnRemote(id: string, position: THREE.Vector3, type: MaterialType) {
-    // Don't spawn if already exists
     if (this.materials.has(id)) return;
     
     const material = new MaterialDrop(position, type);
@@ -57,22 +56,31 @@ export class MaterialManager {
     this.group.add(material.mesh);
   }
   
-  // Force collect a material (from network)
-  collectRemote(id: string) {
+  collectRemote(id: string, collectorId?: string, collectorPosition?: THREE.Vector3) {
     const material = this.materials.get(id);
     if (material) {
-      this.group.remove(material.mesh);
-      material.dispose();
-      this.materials.delete(id);
+      // Animate briefly toward the collector position if provided
+      const target = collectorPosition ? collectorPosition.clone() : material.mesh.position.clone().add(new THREE.Vector3(0, 2, 0));
+      this.remoteMagnetizing.set(id, { target, startTime: Date.now() });
+      
+      setTimeout(() => {
+        if (this.materials.has(id)) {
+          this.group.remove(material.mesh);
+          material.dispose();
+          this.materials.delete(id);
+          this.remoteMagnetizing.delete(id);
+        }
+      }, 800);
     }
   }
   
-  // Update remote material position (from network)
   updateRemotePosition(id: string, position: THREE.Vector3) {
     const material = this.materials.get(id);
-    if (material && !id.startsWith('local_')) {
-      // Smoothly interpolate to new position for remote materials
-      material.mesh.position.lerp(position, 0.3);
+    if (!material) return;
+
+    // Apply remote updates even for locally-owned materials unless we are actively magnetizing them
+    if (!material.isMagnetizingTo()) {
+      material.setTargetPosition(position);
     }
   }
   
@@ -82,15 +90,64 @@ export class MaterialManager {
     const magnetizing: Map<string, THREE.Vector3> = new Map();
     
     this.materials.forEach((material, id) => {
-      // For local player's view, handle magnetization to local player
-      let materialAlive = material.update(dt, playerPosition);
+      const isLocalMaterial = id.startsWith(this.playerId);
       
-      // Check if ANY material is being magnetized to local player
-      if (playerPosition) {
-        const distance = material.mesh.position.distanceTo(playerPosition);
-        if (distance < 8 && distance > 1.5) { // In magnet range but not collected yet
-          magnetizing.set(id, material.mesh.position.clone());
+      let materialAlive: boolean;
+      
+      if (isLocalMaterial) {
+        // Choose nearest collector among all players (including local)
+        let nearestTarget: THREE.Vector3 | undefined;
+        let nearestDist = Infinity;
+        const candidates: THREE.Vector3[] = [];
+        if (playerPosition) candidates.push(playerPosition);
+        if (allPlayerPositions && allPlayerPositions.size > 0) {
+          allPlayerPositions.forEach(pos => candidates.push(pos));
         }
+        if (candidates.length > 0) {
+          for (const candidate of candidates) {
+            const d = material.mesh.position.distanceTo(candidate);
+            if (d < nearestDist) {
+              nearestDist = d;
+              nearestTarget = candidate;
+            }
+          }
+        }
+
+        if (nearestTarget) {
+          materialAlive = material.update(dt, nearestTarget, true);
+        } else {
+          materialAlive = material.update(dt, undefined as any, false);
+        }
+        
+        const lastPos = this.lastPositions.get(id);
+        const currentPos = material.mesh.position;
+        const moved = !lastPos || currentPos.distanceTo(lastPos) > 0.01;
+        
+        if (moved || material.isMagnetizingTo()) {
+          magnetizing.set(id, currentPos.clone());
+          this.lastPositions.set(id, currentPos.clone());
+        }
+      } else {
+        // Never magnetize non-local materials toward the local player.
+        const remoteMagnet = this.remoteMagnetizing.get(id);
+        if (remoteMagnet) {
+          const elapsed = (Date.now() - remoteMagnet.startTime) / 1000;
+          if (elapsed < 0.8) {
+            const speed = 28 * (1 + elapsed * 2);
+            const direction = remoteMagnet.target.clone().sub(material.mesh.position);
+            const distanceToTarget = direction.length();
+            if (distanceToTarget > 0.0001) {
+              direction.normalize();
+              const eased = Math.min(1, elapsed / 0.8);
+              material.mesh.position.add(direction.multiplyScalar(speed * dt * (0.5 + 0.5 * eased)));
+            }
+            const scale = 1 - (elapsed / 0.8) * 0.6;
+            material.mesh.scale.setScalar(scale);
+          }
+        } else {
+          material.updateRemote(dt);
+        }
+        materialAlive = material.update(dt, undefined, false);
       }
       
       if (!materialAlive) {
@@ -104,14 +161,12 @@ export class MaterialManager {
       }
     });
     
-    // Send position updates for ALL materials being magnetized (not just local ones)
     if (this.onMagnetizing && magnetizing.size > 0) {
       magnetizing.forEach((position, materialId) => {
-        this.onMagnetizing(materialId, position);
+        this.onMagnetizing!(materialId, position);
       });
     }
     
-    // Remove dead/collected materials
     toRemove.forEach(({id, material}) => {
       this.group.remove(material.mesh);
       material.dispose();
