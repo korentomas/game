@@ -76,6 +76,11 @@ export class AuthManager {
       this.ws.onmessage = (event) => {
         const message = JSON.parse(event.data);
         
+        if (message.type === 'welcome') {
+          // Ignore the welcome message, wait for auth response
+          return;
+        }
+        
         if (message.type === 'auth-success') {
           const session: UserSession = {
             username: message.username,
@@ -135,6 +140,12 @@ export class AuthManager {
       
       ws.onmessage = (event) => {
         const message = JSON.parse(event.data);
+        
+        if (message.type === 'welcome') {
+          // Ignore the welcome message, wait for auth response
+          return;
+        }
+        
         ws.close();
         
         if (message.type === 'auth-valid') {
